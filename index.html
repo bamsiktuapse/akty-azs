@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f5fa8">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Акты АЗС">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>Акты АЗС</title>
+<link rel="stylesheet" href="fonts/fonts.css">
+<style>
+:root{
+  --bg:#f3f5f8; --card:#fff; --text:#1b1f24; --muted:#667085; --line:#d9dee5;
+  --accent:#1f5fa8; --accent-2:#e8f0fb; --danger:#c0392b; --chip:#eef1f5;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#111418; --card:#1b2027; --text:#e7eaee; --muted:#9aa4b2; --line:#2e3640;
+    --accent:#5b9be6; --accent-2:#1d2a3a; --danger:#e57368; --chip:#262d36;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{position:sticky;top:0;z-index:5;background:var(--accent);color:#fff;padding:10px 16px;display:flex;align-items:center;gap:8px}
+header h1{font-size:18px;margin:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+header button{background:rgba(255,255,255,.18);color:#fff;border:0;border-radius:8px;padding:8px 12px;font-size:14px}
+main{padding:12px 16px 96px;max-width:760px;margin:0 auto}
+nav{position:fixed;bottom:0;left:0;right:0;z-index:5;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;border:0;background:none;color:var(--muted);padding:9px 4px;font-size:12px;display:flex;flex-direction:column;align-items:center;gap:2px}
+nav button b{font-size:19px;line-height:1}
+nav button.on{color:var(--accent);font-weight:600}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin:0 0 12px}
+.card h2{font-size:15px;margin:0 0 8px;color:var(--accent);display:flex;align-items:center;gap:8px}
+.card h2 .sp{flex:1}
+#tab-data .card>h2{cursor:pointer;user-select:none;margin:0}
+#tab-data .card>h2::after{content:"▾";margin-left:auto;color:var(--muted)}
+#tab-data .card.fold>h2::after{content:"▸"}
+#tab-data .card:not(.fold)>h2{margin-bottom:8px}
+#tab-data .card.fold>:not(h2){display:none}
+label{display:block;font-size:13px;color:var(--muted);margin:8px 0 3px}
+input,select,textarea{width:100%;font:inherit;color:var(--text);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 10px;min-width:0}
+textarea{min-height:44px;resize:vertical}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.row{display:flex;gap:8px}.row>*{flex:1;min-width:0}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:8px;padding:9px 12px;font:inherit;font-size:14px;white-space:nowrap}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.sm{padding:5px 9px;font-size:13px}
+.btn.icon{padding:6px 9px;flex:0 0 auto}
+.btn.del{color:var(--danger)}
+.btn.add{border-style:dashed;color:var(--accent);width:100%;margin-top:6px}
+.btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.item{border:1px dashed var(--line);border-radius:10px;padding:8px 10px;margin:8px 0}
+.top{display:flex;gap:6px;align-items:center}
+.top>select,.top>input,.top>.combo,.top>.grp{flex:1}
+.hint{font-size:12px;color:var(--muted);margin-top:4px;word-break:break-word}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.chip{border:1px solid transparent;background:var(--chip);color:var(--text);border-radius:14px;padding:4px 10px;font-size:13px}
+.chip.on{background:var(--accent);color:#fff}
+.check{display:flex;align-items:center;gap:8px;margin:8px 0 0;font-size:14px;color:var(--text)}
+.check input{width:20px;height:20px;flex:0 0 auto}
+.muted{color:var(--muted);font-size:13px}
+.hidden{display:none!important}
+/* поле с кнопкой-стрелкой выбора в конце */
+.combo{position:relative;min-width:0}
+.combo>input,.combo>textarea{padding-right:42px}
+.combo>.arrow{position:absolute;right:1px;top:1px;bottom:1px;width:40px;border:0;background:none;color:var(--muted);font-size:18px;border-radius:0 8px 8px 0}
+.num{flex:0 0 auto;min-width:22px;color:var(--muted);font-weight:600;text-align:right}
+/* поле с неизменяемым префиксом */
+.grp{display:flex;align-items:stretch;border:1px solid var(--line);border-radius:8px;background:var(--bg);overflow:hidden}
+.grp>span{padding:9px 2px 9px 10px;color:var(--muted)}
+.grp>input{border:0;border-radius:0;padding-left:2px;background:transparent}
+.grp:focus-within{outline:2px solid var(--accent);outline-offset:-1px}
+.cam{flex:0 0 auto}
+.toast{position:fixed;left:50%;bottom:84px;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;z-index:30;max-width:90vw;text-align:center}
+.sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:20;display:flex;align-items:flex-end;justify-content:center}
+.sheet{background:var(--card);width:100%;max-width:760px;max-height:85vh;border-radius:14px 14px 0 0;display:flex;flex-direction:column}
+.sheet .hd{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center}
+.sheet .hd b{flex:1}
+.sheet .bd{overflow:auto;padding:4px 0 16px}
+.sheet .pad{padding:8px 16px}
+.sheet .opt{display:block;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);background:none;color:var(--text);font:inherit;padding:11px 16px}
+.sheet img{max-width:100%;max-height:30vh;border-radius:8px;display:block;margin:0 auto}
+.list .li{display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line);padding:7px 0}
+.list .li>div{flex:1;min-width:0;word-break:break-word}
+.list .li input{padding:6px 8px}
+/* база актов: повтор над удалением справа */
+.list .li>.acts{display:flex;flex-direction:column;gap:6px;flex:0 0 auto}
+.ico{width:40px;height:36px;display:flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:8px;background:var(--card);padding:0}
+.ico.rep{color:#1f6fd1;border-color:#1f6fd1}
+.ico.del{color:var(--danger)}
+#dbList .li{cursor:pointer}
+#dbList .li:active{background:var(--accent-2)}
+/* склад пломб: свёрнутый список */
+details.drop{margin-top:8px;border:1px solid var(--line);border-radius:8px;padding:0 10px}
+details.drop summary{padding:9px 0;cursor:pointer;color:var(--text)}
+details.drop .chips{max-height:180px;overflow:auto;padding-bottom:10px}
+.chip .x{border:0;background:none;color:var(--danger);padding:0 0 0 6px;font-size:12px}
+#azsInfo{white-space:pre-line}
+.azsrow{border-bottom:1px solid var(--line);padding:8px 0}
+.azsrow .top{margin-top:6px}
+.formsel{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.formsel .chip{padding:7px 14px;font-size:14px;border-color:var(--line)}
+.formsel .sp{flex:1}
+
+/* ---------- печатные формы по разметке Excel ---------- */
+.pages{display:flex;flex-direction:column;gap:14px;align-items:center}
+.pagewrap{width:100%;overflow:hidden}
+.page{background:#fff;color:#000;width:794px;min-height:1123px;box-shadow:0 1px 6px rgba(0,0,0,.25);overflow:hidden;transform-origin:0 0}
+.page table.xl{border-collapse:collapse;table-layout:fixed;font-family:Carlito,Calibri,sans-serif;font-size:11pt;color:#000}
+.page table.xl td{padding:0 2px;overflow:visible;line-height:1.15;vertical-align:bottom;white-space:pre}
+.page img.sign{position:absolute;top:50%;transform:translateY(-62%);pointer-events:none}
+.signbox{background:#fff;border:1px dashed var(--line);border-radius:8px;min-height:70px;display:flex;align-items:center;justify-content:center;margin-top:8px}
+.signbox img{max-height:90px;max-width:100%}
+.about h3{margin:4px 0 8px}.about h4{margin:14px 0 6px;color:var(--accent)}
+.about ul{margin:4px 0 8px;padding-left:20px}.about li{margin:2px 0}
+.about .ver{border-top:1px solid var(--line);padding-top:6px;margin-top:6px}
+.about .author{margin-top:16px;text-align:right;font-size:15px}
+.pagehead{width:100%;font-size:13px;color:var(--muted);font-weight:600}
+@media print{
+  @page{size:A4;margin:0}
+  html,body{background:#fff}
+  header,nav,.noprint,.pagehead,.toast,#tab-act,#tab-db,#tab-data{display:none!important}
+  main{padding:0;max-width:none}
+  #tab-print{display:block!important}
+  .pages{gap:0;display:block}
+  .pagewrap{height:auto!important;overflow:visible}
+  .page{box-shadow:none;transform:none!important;page-break-after:always;break-after:page}
+  .pagewrap.off{display:none}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Акты АЗС</h1>
+  <button id="btnAbout" title="О приложении">ⓘ</button>
+  <button id="btnNew">Новый</button>
+</header>
+<main>
+<!-- ================= АКТ ================= -->
+<section id="tab-act">
+  <div class="card">
+    <h2>Заявка</h2>
+    <label>АЗС</label>
+    <select id="f-azs"></select>
+    <div class="hint" id="azsInfo"></div>
+    <div class="row">
+      <div><label>Дата</label><input type="date" id="f-date"></div>
+      <div><label>Заявка №</label><div class="grp"><span>SC00</span><input id="f-req" inputmode="numeric" placeholder="27960049"></div></div>
+    </div>
+    <div class="top" style="margin-top:8px"><label style="flex:1;margin:0">Описание (причина инцидента)</label>
+      <button class="btn sm" id="scanDesc" title="Сканировать штрихкод / QR-код заявки">▦ Сканировать</button></div>
+    <textarea id="f-desc" rows="2" style="margin-top:4px"></textarea>
+    <div class="row">
+      <div><label>Прибытие</label><input type="time" id="f-tArr" step="1800"></div>
+      <div><label>Убытие</label><input type="time" id="f-tDep" step="1800"></div>
+      <div><label>Пройдено, км</label><input type="number" inputmode="numeric" id="f-km"></div>
+    </div>
+    <div class="hint">Километраж указывается в один конец (до АЗС) и берётся из справочника АЗС. Изменение здесь действует только для этого акта; в справочник значение записывается, только если там расстояние ещё не указано. Исправить справочник: «Данные → АЗС: расстояния и почта».</div>
+  </div>
+
+  <div class="card">
+    <h2>Оборудование и пломбы</h2>
+    <div id="eqList"></div>
+    <button class="btn add" id="addEq">+ Добавить оборудование</button>
+  </div>
+
+  <div class="card">
+    <h2>Наименование работ</h2>
+    <div id="workList"></div>
+    <button class="btn add" id="addWork">+ Добавить работу</button>
+  </div>
+
+  <div class="card">
+    <h2>Расходный материал</h2>
+    <div id="matList"></div>
+    <button class="btn add" id="addMat">+ Добавить материал</button>
+  </div>
+
+  <div class="btns" style="margin-bottom:12px">
+    <button class="btn pri" id="btnSave" style="flex:1">Сохранить и печать →</button>
+  </div>
+</section>
+
+<!-- ================= ПЕЧАТЬ ================= -->
+<section id="tab-print" class="hidden">
+  <div class="card noprint">
+    <div class="formsel">
+      <button class="chip" data-form="vr">ВР</button>
+      <button class="chip" data-form="pl">Пломбы</button>
+      <button class="chip" data-form="vbrr">ВБРР</button>
+      <button class="chip" data-form="kkt">ККТ</button>
+      <span class="sp"></span>
+      <button class="btn" id="btnPrint">Печать</button>
+      <button class="btn pri" id="btnPdf">Сохранить PDF</button>
+      <button class="btn pri" id="btnMail">✉ На почту</button>
+    </div>
+  </div>
+  <div class="pages" id="pages"></div>
+</section>
+
+<!-- ================= БАЗА АКТОВ ================= -->
+<section id="tab-db" class="hidden">
+  <div class="card">
+    <h2>База актов <span class="sp"></span><span class="muted" id="dbCount"></span></h2>
+    <input id="dbSearch" placeholder="Поиск: АЗС, заявка, работа, пломба…">
+    <div class="list" id="dbList"></div>
+  </div>
+</section>
+
+<!-- ================= ДАННЫЕ ================= -->
+<section id="tab-data" class="hidden">
+  <div class="card">
+    <h2>Исполнитель</h2>
+    <label>Фамилия Имя Отчество (полностью)</label><input id="s-fio" autocapitalize="words" placeholder="Иванов Иван Иванович">
+    <label class="check"><input type="checkbox" id="s-declSur"> Склонять фамилию</label>
+    <div class="hint" id="fioForms" style="white-space:pre-line"></div>
+    <label>Должность (во всех актах)</label><input id="s-pos">
+    <label>Подразделение (акты ВБРР и ККТ)</label><input id="s-dept">
+    <label>Организация исполнителя</label><input id="s-org" placeholder="ООО ИК «СИБИНТЕК»">
+    <label>Заказчик</label><input id="s-cust" placeholder="АО «НК «Роснефть»-Кубаньнефтепродукт»">
+    <label>Договоры</label>
+    <div class="muted">Номер и дата договора печатаются в шапке своего акта; без номера строка не печатается.</div>
+    <div id="contracts"></div>
+    <label>Подпись</label>
+    <div class="muted">Сфотографируйте подпись на белом листе — фон станет прозрачным, подпись встанет в акты на место подписи исполнителя.</div>
+    <div class="signbox" id="signBox"></div>
+    <div class="btns">
+      <label class="btn pri" style="margin:0">Фото подписи<input type="file" id="signFile" accept="image/*" class="hidden"></label>
+      <button class="btn del" id="signDel">Удалить</button>
+    </div>
+    <label class="check"><input type="checkbox" id="s-signOn"> Вставлять подпись в акты</label>
+  </div>
+
+  <div class="card">
+    <h2>Склад пломб</h2>
+    <div class="top"><input id="sealAdd" inputmode="numeric" placeholder="Номер или диапазон 110300-110320"><button class="btn icon pri" id="sealAddBtn" title="Добавить">+</button></div>
+    <details class="drop"><summary>На складе: <b id="sealCount">0</b> <button class="btn sm" id="sealSort" style="float:right;margin-top:-4px"></button></summary><div class="chips" id="sealList"></div></details>
+    <label class="check"><input type="checkbox" id="s-autoSeal"> Списывать установленные пломбы со склада при сохранении акта</label>
+  </div>
+
+  <div class="card">
+    <h2>Работы</h2>
+    <div class="muted">Пополняется автоматически из сохранённых актов. {обор} — подставится выбранное оборудование.</div>
+    <div class="list" id="lst-works"></div>
+    <div class="top" style="margin-top:8px"><input id="add-works" placeholder="Новая работа"><button class="btn icon" data-addto="works">+</button></div>
+  </div>
+
+  <div class="card">
+    <h2>Модели оборудования и материалы</h2>
+    <div class="muted">Только названия моделей. Пополняется автоматически.</div>
+    <div class="list" id="lst-models"></div>
+    <div class="top" style="margin-top:8px"><input id="add-models" placeholder="Новая модель"><button class="btn icon" data-addto="models">+</button></div>
+  </div>
+
+  <div class="card">
+    <h2>Оборудование на АЗС</h2>
+    <div class="muted">Серийные номера из актов попадают сюда автоматически.</div>
+    <select id="eqbAzs" style="margin-top:8px"></select>
+    <div class="list" id="eqbList"></div>
+  </div>
+
+  <div class="card">
+    <h2>АЗС: расстояния и почта</h2>
+    <div class="muted">Пройдено км (в один конец) и почта, на которую отправляются акты этой АЗС (несколько адресов — через запятую).</div>
+    <div class="list" id="azsList"></div>
+  </div>
+
+  <div class="card">
+    <h2>Места установки пломб</h2>
+    <div class="list" id="lst-places"></div>
+    <div class="top" style="margin-top:8px"><input id="add-places" placeholder="Новое место"><button class="btn icon" data-addto="places">+</button></div>
+  </div>
+
+  <div class="card">
+    <h2>Справочник Excel</h2>
+    <div class="muted">Файл «Справочник АЗС.xlsx» (или старый «!!!АКТ.xlsx»): список АЗС и касс заменится данными из файла; оборудование, пломбы, работы и места добавятся к уже имеющимся. База актов не меняется; расстояния, не указанные в файле, сохраняются.</div>
+    <div class="btns"><button class="btn" id="expXlsx">Выгрузить справочник</button>
+      <label class="btn pri" style="margin:0">Загрузить .xlsx<input type="file" id="impXlsx" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden"></label></div>
+    <div class="hint">«Выгрузить» сохраняет все АЗС, кассы, оборудование, пломбы и работы приложения в «Загрузки/АЗС» файлом Excel — его можно поправить на компьютере и загрузить обратно.</div>
+    <div class="hint" id="refCount"></div>
+  </div>
+
+  <div class="card">
+    <h2>Резервная копия</h2>
+    <div class="muted">Все справочники, база актов и настройки. Данные сохраняются при обновлении приложения; кроме того, автокопия всегда лежит в «Загрузки/АЗС/akty-backup.json» — её можно выбрать в «Восстановить» после переустановки или на новом телефоне.</div>
+    <div class="btns">
+      <button class="btn" id="bkSave">Сохранить копию</button>
+      <label class="btn" style="margin:0">Восстановить<input type="file" id="bkLoad" accept=".json,application/json" class="hidden"></label>
+    </div>
+  </div>
+</section>
+</main>
+
+<input type="file" id="camInput" accept="image/*" capture="environment" class="hidden">
+
+<nav>
+  <button data-go="act" class="on"><b>✎</b>Акт</button>
+  <button data-go="print"><b>⎙</b>Печать</button>
+  <button data-go="db"><b>▤</b>База</button>
+  <button data-go="data"><b>☰</b>Данные</button>
+</nav>
+
+<script src="vendor/jszip.min.js"></script>
+<script src="version.js"></script>
+<script src="changelog.js"></script>
+<script src="data.js"></script>
+<script src="layouts.js"></script>
+<script src="xlsxwriter.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,1 @@
+window.DEFAULT_DATA={"azs": [], "kassy": [], "inventory": [], "seals": [], "places": []};

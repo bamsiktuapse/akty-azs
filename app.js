@@ -22,6 +22,7 @@ const DEFAULT_SETTINGS = {
   org: "ООО ИК «СИБИНТЕК»",                        // организация исполнителя — во всех актах
   cust: "АО «НК «Роснефть»-Кубаньнефтепродукт»",  // заказчик
   contracts: {},       // договоры по актам: {vr:{num,date}, pl:…, vbrr:…, kkt:…}; пусто — строка не печатается
+  mailTo: "",          // кому отправлять акты всегда, кроме почты АЗС
   replyTo: '"DV_Melnikov6@sibsoft.rosneft.ru" <dv_melnikov6@sibsoft.rosneft.ru>, paveletmekchyan@yandex.ru',   // куда АЗС отправляет подписанные акты
   autoSeal: true,
   sealDesc: true,
@@ -775,22 +776,24 @@ async function shareFile(file, title, text){
   }
 }
 /* письмо с PDF выбранных актов: тема и текст собираются из акта */
-/* адреса для ответа из настроек: «"Имя" <адрес>, адрес; …» → [адрес, …] */
-function replyAddrs(){ return uniq((String(settings.replyTo||"").match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g)||[]).map(a=>a.toLowerCase())); }
+/* адреса из строки: «"Имя" <адрес>, адрес; …» → [адрес, …] */
+function parseAddrs(s){ return uniq((String(s||"").match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g)||[]).map(a=>a.toLowerCase())); }
+const replyAddrs=()=>parseAddrs(settings.replyTo);
 function mailText(){
   const subject=actFileName();   // тема письма совпадает с именем PDF-файла (без .pdf)
   const to=replyAddrs();
   const body = to.length
     ? "Просьба подписать акты, поставить печать, отсканировать и отправить по следующему адресу:\n"+
-      "mailto:"+to.join(",")+"?subject="+encodeURIComponent(subject)
+      "mailto:"+to.join(";")+"?subject="+encodeURIComponent(subject)   // «;» между адресами понимает Outlook
     : "Просьба подписать акты, поставить печать, отсканировать и отправить в ответ на это письмо.";
   return {subject, body};
 }
 function sendMail(){
   if(!FORMS.some(f=>act.forms[f.key])) return toast("Выберите хотя бы один акт");
   saveToDb();
-  const {subject, body}=mailText(), to=String(azsOf(act.azs).email||"").trim();
-  if(!to) toast("У АЗС № "+act.azs+" не указана почта — адрес можно ввести в письме или добавить в «Данные → АЗС»");
+  // кому: почта АЗС из справочника и постоянные адреса из «Данные → Исполнитель»
+  const {subject, body}=mailText(), to=uniq(parseAddrs(azsOf(act.azs).email).concat(parseAddrs(settings.mailTo))).join(", ");
+  if(!to) toast("Не указано, кому отправлять: адрес можно ввести в письме, добавить почту АЗС в «Данные → АЗС» или адреса в «Данные → Исполнитель»");
   if(NATIVE && Android.emailPdf){ toast("Готовлю письмо…"); Android.emailPdf(actFileName()+".pdf", to, subject, body); return; }
   if(MOBILE && navigator.canShare){
     // адрес в «Поделиться» не передаётся — кладём его в буфер обмена, чтобы вставить в поле «Кому»
@@ -894,7 +897,7 @@ function renderAzsList(){
     <input type="email" multiple inputmode="email" autocapitalize="off" placeholder="почта АЗС" data-email="${i}" value="${esc(a.email)}"></div></div>`).join("");
 }
 function renderData(){
-  ["fio","pos","dept","org","cust","replyTo"].forEach(k=>$("#s-"+k).value=settings[k]||"");
+  ["fio","pos","dept","org","cust","mailTo","replyTo"].forEach(k=>$("#s-"+k).value=settings[k]||"");
   const ct=settings.contracts||{};
   $("#contracts").innerHTML=FORMS.map(f=>`<div class="top" style="margin-top:6px"><b style="flex:0 0 58px">${esc(f.title)}</b>
     <input data-cnum="${f.key}" placeholder="№ договора" value="${esc((ct[f.key]||{}).num||"")}">
@@ -911,7 +914,7 @@ function bindData(){
   $("#contracts").addEventListener("input",e=>{ const k=e.target.dataset.cnum||e.target.dataset.cdate; if(!k) return;
     const ct=settings.contracts=Object.assign({}, settings.contracts); ct[k]=Object.assign({num:"",date:""}, ct[k]);
     ct[k][e.target.dataset.cnum?"num":"date"]=e.target.value.trim(); store.set("settings",settings); });
-  ["fio","pos","dept","org","cust","replyTo"].forEach(k=>$("#s-"+k).addEventListener("input",e=>{settings[k]=e.target.value; store.set("settings",settings); if(k==="fio") renderFio();}));
+  ["fio","pos","dept","org","cust","mailTo","replyTo"].forEach(k=>$("#s-"+k).addEventListener("input",e=>{settings[k]=e.target.value; store.set("settings",settings); if(k==="fio") renderFio();}));
   $("#s-autoSeal").onchange=e=>{settings.autoSeal=e.target.checked; store.set("settings",settings);};
   const addSeals=()=>{ const inp=$("#sealAdd"), add=parseSeals(inp.value); if(!add.length) return;
     ref.seals=uniq(ref.seals.concat(add)); saveRef(); inp.value=""; renderSeals(); renderEquip(); toast("Добавлено пломб: "+add.length); };
@@ -1202,6 +1205,39 @@ function showAbout(){
       <li>база актов с поиском и повтором, справочники АЗС, касс, оборудования, работ и склад пломб;</li>
       <li>загрузка и выгрузка справочника в Excel, подпись исполнителя по фото, автокопия данных.</li>
     </ul>
+    <details class="guide"><summary>Инструкция</summary>
+      <h4>Перед началом</h4>
+      <ol>
+        <li>«Данные → Исполнитель»: ФИО, должность, подразделение, организация, заказчик, номера договоров, фото подписи.</li>
+        <li>Там же — <b>«Кому отправлять акты»</b> (адреса в поле «Кому» каждого письма, вместе с почтой АЗС) и <b>«Адреса для ответа на письмо»</b> (куда АЗС вернёт подписанные акты). Несколько адресов — через запятую.</li>
+        <li>Справочник АЗС, касс и оборудования: «Данные → Справочник Excel → Загрузить .xlsx».${NATIVE?"":" В веб-версии справочник изначально пуст — загрузите его или восстановите резервную копию с Android."}</li>
+        <li>Почту и расстояние до каждой АЗС — «Данные → АЗС: расстояния и почта».</li>
+      </ol>
+      <h4>Акт</h4>
+      <ol>
+        <li>«Новый» в шапке начинает новый акт (заполненный сохраняется в базу).</li>
+        <li>Вкладка «Акт»: АЗС, дата, номер заявки, описание (▦ — считать штрихкод/QR заявки), время прибытия и убытия, километраж.</li>
+        <li>«Оборудование и пломбы»: место установки, снятые и установленные пломбы и серийные номера — вручную или кнопкой 📷 (фото пломбы, наклейки, штрихкода или QR распознаётся без интернета).</li>
+        <li>Работы и расходный материал — из списков или вручную.</li>
+      </ol>
+      <h4>Печать и отправка</h4>
+      <ol>
+        <li>Вкладка «Печать»: отметьте нужные акты — ВР, Пломбы, ВБРР, ККТ.</li>
+        <li>«Печать» — на принтер; «Сохранить PDF» — ${NATIVE?"в «Загрузки/АЗС/Акты»":"через меню «Поделиться» (например, «Сохранить в Файлы»)"}.</li>
+        <li>«✉ На почту» — письмо с PDF: «Кому» — почта АЗС и адреса из настроек, тема — имя файла, в тексте просьба подписать и ссылка для ответа.${NATIVE?"":" На iPhone выберите «Почта» в меню «Поделиться» и вставьте скопированный адрес в «Кому»."}</li>
+      </ol>
+      <h4>База и данные</h4>
+      <ol>
+        <li>«База» — все акты с поиском; акт можно открыть, повторить для новой заявки или удалить.</li>
+        <li>«Данные» — справочники (склад пломб, работы, модели, оборудование на АЗС, места установки); разделы раскрываются нажатием на заголовок.</li>
+        <li>«Резервная копия → Сохранить» — все данные и база актов одним файлом; «Восстановить» — на этом или другом телефоне.</li>
+      </ol>
+      <h4>Обновления</h4>
+      <ol>
+        <li>Новая версия проверяется при каждом запуске (нужен интернет); перед установкой приложение спросит. Данные сохраняются.</li>
+        ${NATIVE?"":"<li>Установка на iPhone: открыть сайт в Safari → «Поделиться» → «На экран „Домой“».</li>"}
+      </ol>
+    </details>
     <div class="btns"><button class="btn pri" id="updCheck">Проверить обновления</button></div>
     <div class="hint" id="updStatus">${esc(updState)}</div>
     <h4>Последние версии</h4>${vers||'<p class="muted">—</p>'}

@@ -118,6 +118,8 @@ details.drop .chips{max-height:180px;overflow:auto;padding-bottom:10px}
 .about h3{margin:4px 0 8px}.about h4{margin:14px 0 6px;color:var(--accent)}
 .about ul{margin:4px 0 8px;padding-left:20px}.about li{margin:2px 0}
 .about .ver{border-top:1px solid var(--line);padding-top:6px;margin-top:6px}
+.about .guide{border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin:10px 0}.about .guide summary{cursor:pointer;font-weight:600;color:var(--accent)}
+.about ol{margin:4px 0 8px;padding-left:20px}.about ol li{margin:3px 0}
 .about .author{margin-top:16px;text-align:right;font-size:15px}
 .pagehead{width:100%;font-size:13px;color:var(--muted);font-weight:600}
 @media print{
@@ -225,6 +227,8 @@ details.drop .chips{max-height:180px;overflow:auto;padding-bottom:10px}
     <label>Договоры</label>
     <div class="muted">Номер и дата договора печатаются в шапке своего акта; без номера строка не печатается.</div>
     <div id="contracts"></div>
+    <label>Кому отправлять акты</label><textarea id="s-mailTo" rows="2" placeholder="ivanov@example.ru, petrov@example.ru"></textarea>
+    <div class="hint">Эти адреса подставляются в поле «Кому» каждого письма вместе с почтой АЗС из «Данные → АЗС». Несколько адресов — через запятую.</div>
     <label>Адреса для ответа на письмо</label><textarea id="s-replyTo" rows="3" placeholder="ivanov@example.ru, petrov@example.ru"></textarea>
     <div class="hint">В письме с актами АЗС просят отправить подписанные акты на эти адреса; в письмо добавляется ссылка для ответа с темой — именем файла. Несколько адресов — через запятую.</div>
     <label>Подпись</label>

@@ -781,8 +781,8 @@ function mailText(){
   const subject=actFileName();   // тема письма совпадает с именем PDF-файла (без .pdf)
   const to=replyAddrs();
   const body = to.length
-    ? "Просьба подписать акты, поставить печать, отсканировать и отправить по следующему адресу: "+to.join(", ")+"\n\n"+
-      "Ссылка для ответа: mailto:"+to.join(",")+"?subject="+encodeURIComponent(subject)
+    ? "Просьба подписать акты, поставить печать, отсканировать и отправить по следующему адресу:\n"+
+      "mailto:"+to.join(",")+"?subject="+encodeURIComponent(subject)
     : "Просьба подписать акты, поставить печать, отсканировать и отправить в ответ на это письмо.";
   return {subject, body};
 }

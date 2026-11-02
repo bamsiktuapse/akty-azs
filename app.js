@@ -22,6 +22,7 @@ const DEFAULT_SETTINGS = {
   org: "ООО ИК «СИБИНТЕК»",                        // организация исполнителя — во всех актах
   cust: "АО «НК «Роснефть»-Кубаньнефтепродукт»",  // заказчик
   contracts: {},       // договоры по актам: {vr:{num,date}, pl:…, vbrr:…, kkt:…}; пусто — строка не печатается
+  replyTo: '"DV_Melnikov6@sibsoft.rosneft.ru" <dv_melnikov6@sibsoft.rosneft.ru>, paveletmekchyan@yandex.ru',   // куда АЗС отправляет подписанные акты
   autoSeal: true,
   sealDesc: true,
   sign: "",            // подпись исполнителя: PNG data-URL с прозрачным фоном
@@ -774,9 +775,15 @@ async function shareFile(file, title, text){
   }
 }
 /* письмо с PDF выбранных актов: тема и текст собираются из акта */
+/* адреса для ответа из настроек: «"Имя" <адрес>, адрес; …» → [адрес, …] */
+function replyAddrs(){ return uniq((String(settings.replyTo||"").match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g)||[]).map(a=>a.toLowerCase())); }
 function mailText(){
   const subject=actFileName();   // тема письма совпадает с именем PDF-файла (без .pdf)
-  const body="Прошу подписать акты, поставить печать, отсканировать и отправить в ответ на это письмо.";
+  const to=replyAddrs();
+  const body = to.length
+    ? "Просьба подписать акты, поставить печать, отсканировать и отправить по следующему адресу: "+to.join(", ")+"\n\n"+
+      "Ссылка для ответа: mailto:"+to.join(",")+"?subject="+encodeURIComponent(subject)
+    : "Просьба подписать акты, поставить печать, отсканировать и отправить в ответ на это письмо.";
   return {subject, body};
 }
 function sendMail(){
@@ -887,7 +894,7 @@ function renderAzsList(){
     <input type="email" multiple inputmode="email" autocapitalize="off" placeholder="почта АЗС" data-email="${i}" value="${esc(a.email)}"></div></div>`).join("");
 }
 function renderData(){
-  ["fio","pos","dept","org","cust"].forEach(k=>$("#s-"+k).value=settings[k]||"");
+  ["fio","pos","dept","org","cust","replyTo"].forEach(k=>$("#s-"+k).value=settings[k]||"");
   const ct=settings.contracts||{};
   $("#contracts").innerHTML=FORMS.map(f=>`<div class="top" style="margin-top:6px"><b style="flex:0 0 58px">${esc(f.title)}</b>
     <input data-cnum="${f.key}" placeholder="№ договора" value="${esc((ct[f.key]||{}).num||"")}">
@@ -904,7 +911,7 @@ function bindData(){
   $("#contracts").addEventListener("input",e=>{ const k=e.target.dataset.cnum||e.target.dataset.cdate; if(!k) return;
     const ct=settings.contracts=Object.assign({}, settings.contracts); ct[k]=Object.assign({num:"",date:""}, ct[k]);
     ct[k][e.target.dataset.cnum?"num":"date"]=e.target.value.trim(); store.set("settings",settings); });
-  ["fio","pos","dept","org","cust"].forEach(k=>$("#s-"+k).addEventListener("input",e=>{settings[k]=e.target.value; store.set("settings",settings); if(k==="fio") renderFio();}));
+  ["fio","pos","dept","org","cust","replyTo"].forEach(k=>$("#s-"+k).addEventListener("input",e=>{settings[k]=e.target.value; store.set("settings",settings); if(k==="fio") renderFio();}));
   $("#s-autoSeal").onchange=e=>{settings.autoSeal=e.target.checked; store.set("settings",settings);};
   const addSeals=()=>{ const inp=$("#sealAdd"), add=parseSeals(inp.value); if(!add.length) return;
     ref.seals=uniq(ref.seals.concat(add)); saveRef(); inp.value=""; renderSeals(); renderEquip(); toast("Добавлено пломб: "+add.length); };

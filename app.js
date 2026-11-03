@@ -689,18 +689,24 @@ function cellText(v, fmt){
 }
 /* Подпись исполнителя: где на листе стоит (ячейка) и сдвиг от её левого края; накладывается поверх, разметку не меняет */
 function textW(text, font){ const c=textW.c||(textW.c=document.createElement("canvas").getContext("2d")); c.font=font; return c.measureText(text).width; }
+if(document.fonts) ["11pt Carlito","italic 10pt Carlito"].forEach(f=>document.fonts.load(f,"Яя_"));   // иначе первый замер textW идёт по запасному шрифту
 const SIGN_H=34;   // высота подписи в px листа
 function signW(){ return settings.signRatio ? Math.min(SIGN_H*settings.signRatio, 130) : 90; }
 const LEAD=" ".repeat(53);   // отступ перед «/ ФИО» в ВБРР и ККТ
+const signMid=(start,w)=>start+(w-signW())/2;   // сдвиг, при котором подпись стоит по центру места шириной w
+const lineW=(n,font)=>textW("_".repeat(n),font);
+const colsW=(sheet,from,to)=>window.LAYOUTS[sheet].cols.slice(from,to).reduce((a,b)=>a+b,0);
+/* ВБРР и ККТ: линии нет — подпись над «(подпись)» (её центр в 108 px от края ячейки), но не заходит на «/ ФИО» */
+const signCap=()=>Math.min(108-signW()/2, 2+textW(LEAD,"italic 10pt Carlito")-signW()-2);
 const SIGN_SPOTS = {
-  vr:   [ {ref:"A31", x:()=>2+textW("Работу выполнил "+FIO().short+" подпись ", "11pt Carlito")+8},
-          {ref:"C36", x:()=>6} ],
-  pl:   [ {ref:"BG30", x:()=>4} ],
-  vbrr: [ {ref:"AT31", x:()=>2+textW(LEAD, "italic 10pt Carlito")-signW()-6} ],
-  kkt:  [ {ref:"AT40", x:()=>2+textW(LEAD, "italic 10pt Carlito")-signW()-6} ]
+  vr:   [ {ref:"A31", x:()=>signMid(2+textW("Работу выполнил "+FIO().short+" подпись ", "11pt Carlito"), lineW(19,"11pt Carlito"))},
+          {ref:"C36", x:()=>signMid(2, lineW(13,"11pt Carlito"))} ],
+  pl:   [ {ref:"BG30", x:()=>signMid(0, colsW("Пломбы",58,70))} ],   // над «(подпись)» в BK31
+  vbrr: [ {ref:"AT31", x:signCap} ],
+  kkt:  [ {ref:"AT40", x:signCap} ]
 };
 function signImg(spot){
-  return `<img class="sign" src="${settings.sign}" alt="" style="left:${Math.round(spot.x())}px;height:${SIGN_H}px;max-width:130px">`;
+  return `<img class="sign" src="${settings.sign}" alt="" style="left:${Math.round(spot.x())}px;height:${SIGN_H}px;max-width:130px${spot.mid?";transform:translateY(-50%)":""}">`;
 }
 
 /* Описание каждого акта: лист, постоянные ячейки и блоки строк, которые растягиваются под число записей */
@@ -759,7 +765,7 @@ function renderSheet(form, M){
       if(vals) v = vals[col]!=null ? vals[col] : "";
       else v = ref in statics ? statics[ref] : (cell && !cell[3] ? cell[1] : "");
       const t=cellText(v, cell && cell[2]);
-      const sp=!vals ? spots[ref] : (vals[col] && vals[col].sign!=null && {x:()=>vals[col].sign});
+      const sp=!vals ? spots[ref] : (vals[col] && vals[col].sign!=null && {x:()=>vals[col].sign, mid:true});
       const rs=rspan.get(tr+","+c);
       h+=`<td${span>1?` colspan="${span}"`:""}${rs?` rowspan="${rs}"`:""}${cell||sp?` style="${cell?L.styles[cell[0]]:""}${sp?";position:relative":""}"`:""}>${t?esc(t):""}${sp?signImg(sp):""}</td>`;
     }
@@ -1023,9 +1029,8 @@ function gsmActText(){
     "составили настоящий акт о том, что Работник по поручению и в интересах Работодателя использовал"+(male?"":"а")+" свой личный автотранспорт:";
 }
 /* подпись работника в «Акте ТС» (над чертой после «Работник», текст по центру объединения G:J) и в «Отчёте» */
-SIGN_SPOTS.gsmAct=[{ref:"G23", x:()=>{ const L=window.LAYOUTS["Акт ТС"], w=L.cols.slice(6,10).reduce((a,b)=>a+b,0);
-  return (w-textW("Работник"+"_".repeat(23),"12pt Arial"))/2+textW("Работник","12pt Arial")+30; }}];
-SIGN_SPOTS.gsmRep=[{ref:"A19", x:()=>2+textW(FIO().short+"  /","12pt Arial")+30}];
+SIGN_SPOTS.gsmAct=[{ref:"G23", x:()=>signMid((colsW("Акт ТС",6,10)-textW("Работник"+"_".repeat(23),"12pt Arial"))/2+textW("Работник","12pt Arial"), lineW(23,"12pt Arial"))}];
+SIGN_SPOTS.gsmRep=[{ref:"A19", x:()=>signMid(2+textW(FIO().short+"  /","12pt Arial"), lineW(18,"12pt Arial"))}];
 /* листы отчёта — через renderSheet, как акты */
 function gsmPages(G){
   const pages=[], sign=settings.sign && settings.signOn;
@@ -1034,7 +1039,7 @@ function gsmPages(G){
       items:()=>{ const a=x.trips.slice(); while(a.length<7) a.push(null); return a; },
       fill:(t,i)=>t ? {A:i+1, B:{date:t.date}, C:"8:00", D:"0", E:{date:t.date}, F:"17:00", G:"0",
           H:"Место парковки ТС - АЗС "+t.azs+" - Место парковки ТС", K:t.reqs.map(q=>"SC00"+q).join(", ")||"ЗИП",
-          L:tripKm(t), M:fmtN(tripKm(t)*G.rate/100), N:sign ? {sign:16} : ""}
+          L:tripKm(t), M:fmtN(tripKm(t)*G.rate/100), N:sign ? {sign:signMid(0, colsW("мл №1",13,14))} : ""}
         : {A:i+1, C:"8:00", D:"0", F:"17:00", G:"0", L:"0", M:"0,00"}}],
       cells:()=>({A1:"    Маршрутный лист № "+x.w, A2:"на период "+fmtDate(x.fromIso)+" - "+fmtDate(x.toIso), A3:gsmHead(),
         E14:fmtN(G.start), E15:fmtN(x.km), E16:fmtN(x.liters), E17:fmtN(x.end), M15:String(G.rate).replace(".",","), O17:""})}, null)});

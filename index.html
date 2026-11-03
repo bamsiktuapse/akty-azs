@@ -115,6 +115,10 @@ details.drop .chips{max-height:180px;overflow:auto;padding-bottom:10px}
 .page img.sign{position:absolute;top:50%;transform:translateY(-62%);pointer-events:none}
 .signbox{background:#fff;border:1px dashed var(--line);border-radius:8px;min-height:70px;display:flex;align-items:center;justify-content:center;margin-top:8px}
 .signbox img{max-height:90px;max-width:100%}
+.misses{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px;margin-top:8px}
+.miss{position:relative;font-size:12px}
+.miss img{display:block;width:100%;height:90px;object-fit:cover;border-radius:6px;background:#eee}
+.miss .ico{position:absolute;top:2px;right:2px;background:#fff;border-radius:6px}
 .about h3{margin:4px 0 8px}.about h4{margin:14px 0 6px;color:var(--accent)}
 .about ul{margin:4px 0 8px;padding-left:20px}.about li{margin:2px 0}
 .about .ver{border-top:1px solid var(--line);padding-top:6px;margin-top:6px}
@@ -321,6 +325,17 @@ details.drop .chips{max-height:180px;overflow:auto;padding-bottom:10px}
       <label class="btn pri" style="margin:0">Загрузить .xlsx<input type="file" id="impXlsx" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden"></label></div>
     <div class="hint">«Выгрузить» сохраняет все АЗС, кассы, оборудование, пломбы и работы приложения в «Загрузки/АЗС» файлом Excel — его можно поправить на компьютере и загрузить обратно.</div>
     <div class="hint" id="refCount"></div>
+  </div>
+
+  <div class="card">
+    <h2>Нераспознанные фото</h2>
+    <div class="muted">Снимки, с которых не удалось считать номер или код, сохраняются здесь сами — последние 50. В резервную копию не входят: нужные выгрузите в ZIP.</div>
+    <div class="hint" id="missCount"></div>
+    <div class="btns">
+      <button class="btn pri" id="missExp">Выгрузить ZIP</button>
+      <button class="btn del" id="missClr">Удалить все</button>
+    </div>
+    <div class="misses" id="missList"></div>
   </div>
 
   <div class="card">

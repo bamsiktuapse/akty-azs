@@ -562,11 +562,74 @@ async function onPhoto(file){
     }
     st.textContent = found.length ? "Найдено "+how+(found.length>1?" — нажмите, чтобы выбрать:":":")
                                   : (mode==="text" ? "Штрихкод/QR-код не найден — снимите ближе и ровнее." : "Ничего не распознано, введите вручную.");
+    if(!found.length) keepMiss(file, mode, st);
     let sel=new Set(mode==="digits"?found:found.slice(0,1));
     const draw=()=>{ ch.innerHTML=found.map(f=>`<button class="chip ${sel.has(f)?"on":""}" data-f="${esc(f)}">${esc(f)}</button>`).join(""); res.value=[...sel].join(mode==="digits"?", ":""); };
     ch.onclick=e=>{ const f=e.target.dataset.f; if(!f) return; if(mode==="digits"){ sel.has(f)?sel.delete(f):sel.add(f); } else sel=new Set([f]); draw(); };
     draw();
-  }catch(e){ console.error(e); st.textContent="Распознавание недоступно ("+e.message+"). Введите вручную."; }
+  }catch(e){ console.error(e); st.textContent="Распознавание недоступно ("+e.message+"). Введите вручную."; keepMiss(file, mode, st); }
+}
+
+/* ================= Нераспознанные фото: хранятся в IndexedDB (в localStorage не поместятся), выгружаются в ZIP ================= */
+const MISS_MAX=50, MISS_SIDE=2500, MISS_PART=20e6, MISS_MODE={digits:"пломбы", serial:"серийный", text:"код"};
+let missDb=null;
+function missOpen(){
+  return missDb || (missDb=new Promise((ok,fail)=>{ const r=indexedDB.open("akty-photos",1);
+    r.onupgradeneeded=()=>r.result.createObjectStore("miss",{keyPath:"id",autoIncrement:true});
+    r.onsuccess=()=>ok(r.result); r.onerror=()=>{ missDb=null; fail(r.error); }; }));
+}
+async function missTx(mode, fn){
+  const db=await missOpen();
+  return new Promise((ok,fail)=>{ const t=db.transaction("miss",mode), q=fn(t.objectStore("miss")); t.oncomplete=()=>ok(q&&q.result); t.onerror=t.onabort=()=>fail(t.error); });
+}
+const missAll=()=>missTx("readonly",s=>s.getAll());
+/* копия снимка (длинная сторона до MISS_SIDE) и миниатюра для списка; самые старые снимки сверх MISS_MAX удаляются */
+async function missSave(file, mode){
+  const img=await loadImg(file), k=Math.min(1, MISS_SIDE/Math.max(img.width,img.height)), c=document.createElement("canvas");
+  c.width=Math.round(img.width*k); c.height=Math.round(img.height*k); c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+  URL.revokeObjectURL(img.src);
+  const photo=await new Promise(ok=>c.toBlob(ok,"image/jpeg",.9)), thumb=await photoData(file,200,.6);
+  await missTx("readwrite",s=>s.add({date:new Date().toISOString(), mode, azs:act.azs||"", thumb, photo}));
+  const keys=await missTx("readonly",s=>s.getAllKeys());
+  if(keys.length>MISS_MAX) await missTx("readwrite",s=>{ keys.slice(0,keys.length-MISS_MAX).forEach(id=>s.delete(id)); });
+  renderMiss();
+}
+const keepMiss=(file,mode,st)=>missSave(file,mode).then(()=>{ st.textContent+=" Фото сохранено в «Данные → Нераспознанные фото»."; }).catch(e=>console.warn("Фото не сохранено:", e));
+const missDay=r=>{ const d=new Date(r.date); return [d.getFullYear(),pad(d.getMonth()+1),pad(d.getDate())].join("-"); };   // местная дата снимка
+function missName(r){
+  const d=new Date(r.date), t=missDay(r)+"_"+[pad(d.getHours()),pad(d.getMinutes()),pad(d.getSeconds())].join("-");
+  return [t, r.azs&&"АЗС"+r.azs, MISS_MODE[r.mode], r.id].filter(Boolean).join("_")+".jpg";
+}
+async function renderMiss(){
+  const all=await missAll().catch(e=>{ console.warn(e); return []; });
+  $("#missCount").textContent=all.length ? "Сохранено: "+all.length+" из "+MISS_MAX : "Пока нет сохранённых фото.";
+  $("#missList").innerHTML=all.slice().reverse().map(r=>`<div class="miss"><img src="${esc(r.thumb)}" data-miss="${r.id}" alt="">
+    <button class="ico del" data-rmmiss="${r.id}" title="Удалить">${ICON_TRASH}</button>
+    <div class="muted">${esc(fmtDate(missDay(r)))} · ${esc(MISS_MODE[r.mode]||"")}${r.azs?" · АЗС "+esc(r.azs):""}</div></div>`).join("");
+  $("#missExp").disabled=$("#missClr").disabled=!all.length;
+}
+/* в APK файл идёт через мост строкой base64, поэтому большая выгрузка делится на несколько ZIP */
+async function missExport(){
+  const parts=[[]]; let size=0;
+  (await missAll()).forEach(r=>{ if(NATIVE && size+r.photo.size>MISS_PART && parts[parts.length-1].length){ parts.push([]); size=0; }
+    parts[parts.length-1].push(r); size+=r.photo.size; });
+  for(let i=0;i<parts.length;i++){
+    const zip=new JSZip(); parts[i].forEach(r=>zip.file(missName(r), r.photo));
+    await saveBlob(await zip.generateAsync({type:"blob", mimeType:"application/zip"}), "Нераспознанные_"+today()+(parts.length>1?"_"+(i+1):"")+".zip");
+  }
+  if(NATIVE) toast("Сохранено в «Загрузки/АЗС»"+(parts.length>1?": архивов "+parts.length:""));
+}
+function bindMiss(){
+  $("#missList").addEventListener("click",async e=>{
+    const rm=e.target.closest("[data-rmmiss]");
+    if(rm){ if(confirm("Удалить это фото?")){ await missTx("readwrite",s=>s.delete(+rm.dataset.rmmiss)); renderMiss(); } return; }
+    const id=e.target.dataset.miss; if(id==null) return;
+    const r=await missTx("readonly",s=>s.get(+id)); if(!r) return;
+    const img=sheet(missName(r), `<div class="bd"><div class="pad"><img alt="" style="width:100%"></div></div>`).querySelector("img");
+    img.onload=()=>URL.revokeObjectURL(img.src); img.src=URL.createObjectURL(r.photo);
+  });
+  $("#missExp").onclick=()=>missExport().catch(e=>{ console.error(e); alert("Не удалось выгрузить фото: "+e.message); });
+  $("#missClr").onclick=async()=>{ if(!confirm("Удалить все нераспознанные фото?")) return; await missTx("readwrite",s=>s.clear()); renderMiss(); };
 }
 
 /* ================= Подпись по фото ================= */
@@ -1158,10 +1221,11 @@ function renderData(){
   $("#s-autoSeal").checked=!!settings.autoSeal;
   renderSeals();
   ["works","models","places"].forEach(listEditor);
-  renderEquipBase(); renderAzsList();
+  renderEquipBase(); renderAzsList(); renderMiss();
   $("#refCount").textContent="Сейчас: АЗС "+ref.azs.length+", касс "+ref.kassy.length;
 }
 function bindData(){
+  bindMiss();
   $("#contracts").addEventListener("input",e=>{ const k=e.target.dataset.cnum||e.target.dataset.cdate; if(!k) return;
     const ct=settings.contracts=Object.assign({}, settings.contracts); ct[k]=Object.assign({num:"",date:""}, ct[k]);
     ct[k][e.target.dataset.cnum?"num":"date"]=e.target.value.trim(); store.set("settings",settings); });
@@ -1489,6 +1553,7 @@ function showAbout(){
       <ol>
         <li>«База» — все акты с поиском; акт можно открыть, повторить для новой заявки или удалить.</li>
         <li>«Данные» — справочники (склад пломб, работы, модели, оборудование на АЗС, места установки); разделы раскрываются нажатием на заголовок.</li>
+        <li>«Нераспознанные фото» — снимки, с которых не удалось считать номер или код, сохраняются сами (последние ${MISS_MAX}); «Выгрузить ZIP» собирает их в архив.</li>
         <li>«Резервная копия → Сохранить» — все данные и база актов одним файлом; «Восстановить» — на этом или другом телефоне.</li>
       </ol>
       <h4>Обновления</h4>

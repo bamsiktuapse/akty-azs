@@ -23,6 +23,15 @@ const DEFAULT_SETTINGS = {
   cust: "АО «НК «Роснефть»-Кубаньнефтепродукт»",  // заказчик
   contracts: {},       // договоры по актам: {vr:{num,date}, pl:…, vbrr:…, kkt:…}; пусто — строка не печатается
   mailTo: "",          // кому отправлять акты всегда, кроме почты АЗС
+  carModel: "",                // отчёт по ГСМ (заполняется в «Исполнителе»): автомобиль, норма расхода, шапка маршрутных листов
+  carPlate: "",
+  gsmRate: "12.3",             // л на 100 км
+  gsmOrg: "ООО ИК «СИБИНТЕК» филиал «Макрорегион-Юг»",
+  gsmDept: "Сектор ИТ-сервисов Инженерно-технической службы Краснодар Краснодарского РПУ",
+  gsmBoss: "",                 // ФИО начальника — руководитель СП в «Отчёте»
+  gsmRep: "", gsmProxy: "",    // «Акт ТС»: работодатель в лице (ФИО) и доверенность
+  gsmPark: "",                 // место парковки ТС — начало и конец маршрута
+  gsmStart: {}, gsmEnd: {},    // остаток ГСМ по месяцам: введённый на начало и рассчитанный на конец
   replyTo: '"DV_Melnikov6@sibsoft.rosneft.ru" <dv_melnikov6@sibsoft.rosneft.ru>, paveletmekchyan@yandex.ru',   // куда АЗС отправляет подписанные акты
   autoSeal: true,
   sealDesc: true,
@@ -120,7 +129,9 @@ function defaultRef(){
     places: D.places,
     seals: D.seals,
     works: DEFAULT_WORKS.slice(),
-    equipBase: inv.filter(i=>i.sn).map(i=>({azs:i.azs, model:i.model, sn:i.sn, date:"", req:""}))
+    equipBase: inv.filter(i=>i.sn).map(i=>({azs:i.azs, model:i.model, sn:i.sn, date:"", req:""})),
+    routes: {},    // снимок маршрута по номеру АЗС (data-URL JPEG) — для «Маршрутов» отчёта по ГСМ
+    refuels: []    // заправки по топливной карте: {id, date, liters, photo}
   };
 }
 let ref = store.get("ref", null) || defaultRef();
@@ -670,7 +681,10 @@ function renderSheet(form, M){
   const merge=new Map(), covered=new Set();
   const extra=form.extra||{};   // ячейки, которых нет в шаблоне: {A4:{to:последний столбец, like:ячейка-образец стиля}}
   Object.entries(extra).forEach(([ref,x])=>{ const m=ref.match(/^([A-Z]+)(\d+)$/), c=names.indexOf(m[1])+c1; L.merges.some(g=>g[0]==+m[2]&&g[1]==c) || L.merges.push([+m[2],c,+m[2],x.to]); });
-  L.merges.forEach(([mr1,mc1,mr2,mc2])=>{ merge.set(mr1+","+mc1, mc2-mc1+1); for(let c=mc1+1;c<=mc2;c++) covered.add(mr1+","+c); });
+  const rspan=new Map();   // объединения по строкам — только для листов с form.rowspan (отчёт по ГСМ); акты рисуются как раньше
+  L.merges.forEach(([mr1,mc1,mr2,mc2])=>{ merge.set(mr1+","+mc1, mc2-mc1+1);
+    const rl=form.rowspan ? mr2 : mr1; if(rl>mr1) rspan.set(mr1+","+mc1, rl-mr1+1);
+    for(let r=mr1;r<=rl;r++) for(let c=mc1;c<=mc2;c++) if(r!==mr1 || c!==mc1) covered.add(r+","+c); });
   const statics=form.cells(M);
   const spots={}; if(settings.sign && settings.signOn) (SIGN_SPOTS[form.key]||[]).forEach(s=>spots[s.ref]=s);
   const row=(tr, vals)=>{   // vals: значения по букве столбца для блочной строки, иначе null
@@ -682,8 +696,9 @@ function renderSheet(form, M){
       if(vals) v = vals[col]!=null ? vals[col] : "";
       else v = ref in statics ? statics[ref] : (cell && !cell[3] ? cell[1] : "");
       const t=cellText(v, cell && cell[2]);
-      const sp=!vals && spots[ref];
-      h+=`<td${span>1?` colspan="${span}"`:""}${cell||sp?` style="${cell?L.styles[cell[0]]:""}${sp?";position:relative":""}"`:""}>${t?esc(t):""}${sp?signImg(sp):""}</td>`;
+      const sp=!vals ? spots[ref] : (vals[col] && vals[col].sign!=null && {x:()=>vals[col].sign});
+      const rs=rspan.get(tr+","+c);
+      h+=`<td${span>1?` colspan="${span}"`:""}${rs?` rowspan="${rs}"`:""}${cell||sp?` style="${cell?L.styles[cell[0]]:""}${sp?";position:relative":""}"`:""}>${t?esc(t):""}${sp?signImg(sp):""}</td>`;
     }
     return h+"</tr>";
   };
@@ -697,8 +712,9 @@ function renderSheet(form, M){
   }
   const width=L.cols.reduce((a,b)=>a+b,0);
   const [mt,mr,mb,ml]=L.margins.map(x=>x*96);
-  const zoom=Math.min((L.scale||100)/100, (794-ml-mr)/width);
-  return `<div class="page" style="padding:${mt}px ${mr}px ${mb}px ${ml}px"><table class="xl" style="width:${width}px;zoom:${zoom}"><colgroup>${L.cols.map(w=>`<col style="width:${w}px">`).join("")}</colgroup>${body}</table></div>`;
+  const pw=L.landscape ? 1123 : 794;   // ширина листа A4, px
+  const zoom=Math.min((L.scale||100)/100, (pw-ml-mr)/width);
+  return `<div class="page" style="padding:${mt}px ${mr}px ${mb}px ${ml}px${L.landscape?";width:1123px;min-height:794px":""}"><table class="xl" style="width:${width}px;zoom:${zoom}"><colgroup>${L.cols.map(w=>`<col style="width:${w}px">`).join("")}</colgroup>${body}</table></div>`;
 }
 function renderPrint(){
   document.querySelectorAll("[data-form]").forEach(c=>c.classList.toggle("on",!!act.forms[c.dataset.form]));
@@ -855,9 +871,11 @@ function renderDb(){
       <div class="muted">${esc(a.works.filter(Boolean).join("; ")||a.desc||"—")}</div></div>
       <div class="acts"><button class="ico rep" data-rep title="Повторить">${ICON_REPEAT}</button><button class="ico del" data-rm title="Удалить">${ICON_TRASH}</button></div></div>`; }).join("")
     || `<p class="muted">${acts.length?"Ничего не найдено":"Сохранённые акты появятся здесь."}</p>`;
+  renderGsm();
 }
 function bindDb(){
   $("#dbSearch").oninput=renderDb;
+  bindGsm();
   $("#dbList").addEventListener("click",e=>{
     const li=e.target.closest(".li"); if(!li) return;
     const b=e.target.closest("button") || {dataset:{}};   // нажатие на сам акт — открыть его
@@ -867,6 +885,239 @@ function bindDb(){
     act = b.dataset.rep!=null ? repeatAct(a) : JSON.parse(JSON.stringify(a));
     saveAct(); renderAct(); go("act"); if(b.dataset.rep!=null) toast("Создан новый акт по образцу");
   });
+}
+
+/* ================= Отчёт по ГСМ =================
+   Как «Шаблон отчётности … .xlsx»: маршрутные листы по неделям («мл №1…5»), «Акт ТС», «Отчёт» и фото чеков — одним PDF;
+   отдельно «Маршруты» (.docx): дата поездки и снимок маршрута до АЗС. Разметка листов — LAYOUTS из шаблона (tools/build_www.py).
+   Поездка — выезд на АЗС в один день (несколько заявок на одной АЗС — одна строка); пробег — туда и обратно. */
+const MONTHS_NOM=["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"];
+const fmtN=(x,d=2)=>(Math.round(x*10**d)/10**d).toFixed(d).replace(".",",").replace("-0,00","0,00");
+const dIso=(y,m,d)=>y+"-"+pad(m)+"-"+pad(d);
+function monthNow(){ return today().slice(0,7); }
+function prevMonth(month){ const [y,m]=month.split("-").map(Number); return m===1 ? (y-1)+"-12" : y+"-"+pad(m-1); }
+function gsmTrips(month){
+  const all=acts.slice(); if(act && actHasContent(act) && !all.some(x=>x.id===act.id)) all.push(act);
+  const by=new Map();
+  all.filter(a=>(a.date||"").startsWith(month) && a.azs).forEach(a=>{
+    const k=a.date+"|"+a.azs, km=Number(String(a.km||azsOf(a.azs).km||"").replace(",","."))||0;
+    const t=by.get(k)||{date:a.date, azs:String(a.azs), reqs:[], km:0};
+    if(a.req && !t.reqs.includes(a.req)) t.reqs.push(a.req);
+    t.km=Math.max(t.km, km); by.set(k,t);
+  });
+  return [...by.values()].sort((a,b)=>a.date.localeCompare(b.date) || a.azs.localeCompare(b.azs,"ru",{numeric:true}));
+}
+const tripKm=t=>Math.round(t.km*2);   // туда и обратно, целые км — как в маршрутных листах
+/* недели как в листе «Отчёт»: 1-я — с 1-го числа по первое воскресенье, дальше по 7 дней, 5-я — до конца месяца */
+function gsmWeeks(month){
+  const [y,m]=month.split("-").map(Number), last=new Date(y,m,0).getDate();
+  const sun=1+(7-new Date(y,m-1,1).getDay())%7;   // первое воскресенье
+  const W=[{w:1, from:1, to:sun}];
+  for(let w=2;w<=5;w++){ const from=sun+1+(w-2)*7; W.push({w, from:Math.min(from,last+1), to:w===5 ? last : Math.min(from+6,last)}); }
+  return W.map(x=>Object.assign(x,{fromIso:dIso(y,m,Math.min(x.from,last)), toIso:dIso(y,m,x.to), empty:x.from>x.to}));
+}
+function gsmWeekOf(dateStr, W){ const d=+dateStr.slice(8,10); return (W.find(x=>d>=x.from && d<=x.to)||W[4]).w; }
+const refuels=month=>(ref.refuels||[]).filter(r=>(r.date||"").startsWith(month)).sort((a,b)=>a.date.localeCompare(b.date));
+function gsmStartOf(month){
+  const s=(settings.gsmStart||{})[month]; if(s!=null && s!=="") return Number(String(s).replace(",","."))||0;
+  const e=(settings.gsmEnd||{})[prevMonth(month)]; return e!=null ? e : 0;   // остаток на конец прошлого месяца
+}
+/* все расчёты отчёта за месяц */
+function gsmModel(month){
+  const W=gsmWeeks(month), trips=gsmTrips(month), rate=Number(String(settings.gsmRate||"").replace(",","."))||0, start=gsmStartOf(month);
+  let bal=start;
+  const weeks=W.map(x=>{
+    const list=trips.filter(t=>gsmWeekOf(t.date,W)===x.w), fuel=refuels(month).filter(r=>gsmWeekOf(r.date,W)===x.w);
+    const km=list.reduce((s,t)=>s+tripKm(t),0), liters=fuel.reduce((s,r)=>s+(Number(r.liters)||0),0);
+    bal=bal-km*rate/100+liters;
+    return Object.assign({}, x, {trips:list, km, liters, end:bal});
+  });
+  return {month, W, trips, rate, start, weeks, end:bal, total:weeks.reduce((s,x)=>s+x.km,0)};
+}
+function gsmHead(){
+  const F=settings.fio||"";
+  return ["Организация: "+(settings.gsmOrg||""), "Подразделение: "+(settings.gsmDept||""), "Сведения о собственнике ТС (ФИО):  "+F,
+    "Сведения о ТС (марка, государственный номерной знак):  "+[settings.carModel,settings.carPlate].filter(Boolean).join(", "), "Сведения о водителе (ФИО): "+F].join("\n");
+}
+/* должность в родительном падеже: «Ведущий специалист» → «ведущего специалиста» (склоняется до первого существительного) */
+function genPos(pos){
+  let done=false;
+  return String(pos||"").trim().toLowerCase().split(/\s+/).map(w=>{
+    if(done || !w) return w;
+    if(/(ый|ий|ой)$/.test(w)) return w.slice(0,-2)+(/[жшчщ]ий$/.test(w)?"его":"ого");
+    done=true;
+    if(/[йь]$/.test(w)) return w.slice(0,-1)+"я";
+    if(/а$/.test(w)) return w.slice(0,-1)+(/[гкхжшчщ]а$/.test(w)?"и":"ы");
+    return /[бвгджзклмнпрстфхцчшщ]$/.test(w) ? w+"а" : w;
+  }).join(" ");
+}
+/* текст «Акта ТС»: организация, представитель и ФИО работника — из «Данные → Исполнитель» */
+function gsmActText(){
+  const org=settings.org||"", F=fioForms(settings.fio||""), male=!/(на|кызы)$/.test(F.full), rep=String(settings.gsmRep||"").trim();
+  return org+", именуемое в дальнейшем «Работодатель», в лице "+(rep ? fioForms(rep).gen : "____________________")+
+    ", действующего на основании доверенности: "+(String(settings.gsmProxy||"").trim()||"____________")+" , с одной стороны и работник "+org+", "+F.full+
+    ", "+(male?"занимающий":"занимающая")+" должность "+genPos(settings.pos)+", "+(male?"именуемый":"именуемая")+" в дальнейшем «Работник», с другой стороны, "+
+    "составили настоящий акт о том, что Работник по поручению и в интересах Работодателя использовал"+(male?"":"а")+" свой личный автотранспорт:";
+}
+/* подпись работника в «Акте ТС» (над чертой после «Работник», текст по центру объединения G:J) и в «Отчёте» */
+SIGN_SPOTS.gsmAct=[{ref:"G23", x:()=>{ const L=window.LAYOUTS["Акт ТС"], w=L.cols.slice(6,10).reduce((a,b)=>a+b,0);
+  return (w-textW("Работник"+"_".repeat(23),"12pt Arial"))/2+textW("Работник","12pt Arial")+30; }}];
+SIGN_SPOTS.gsmRep=[{ref:"A19", x:()=>2+textW(FIO().short+"  /","12pt Arial")+30}];
+/* листы отчёта — через renderSheet, как акты */
+function gsmPages(G){
+  const pages=[], sign=settings.sign && settings.signOn;
+  G.weeks.forEach(x=>{
+    pages.push({land:true, html:renderSheet({sheet:"мл №1", key:"gsm", blocks:[{from:6, to:12,
+      items:()=>{ const a=x.trips.slice(); while(a.length<7) a.push(null); return a; },
+      fill:(t,i)=>t ? {A:i+1, B:{date:t.date}, C:"8:00", D:"0", E:{date:t.date}, F:"17:00", G:"0",
+          H:"Место парковки ТС - АЗС "+t.azs+" - Место парковки ТС", K:t.reqs.map(q=>"SC00"+q).join(", ")||"ЗИП",
+          L:tripKm(t), M:fmtN(tripKm(t)*G.rate/100), N:sign ? {sign:16} : ""}
+        : {A:i+1, C:"8:00", D:"0", F:"17:00", G:"0", L:"0", M:"0,00"}}],
+      cells:()=>({A1:"    Маршрутный лист № "+x.w, A2:"на период "+fmtDate(x.fromIso)+" - "+fmtDate(x.toIso), A3:gsmHead(),
+        E14:fmtN(G.start), E15:fmtN(x.km), E16:fmtN(x.liters), E17:fmtN(x.end), M15:String(G.rate).replace(".",","), O17:""})}, null)});
+  });
+  const [y,m]=G.month.split("-").map(Number), last=new Date(y,m,0).getDate(), next=m===12 ? dIso(y+1,1,1) : dIso(y,m+1,1);
+  pages.push({html:renderSheet({sheet:"Акт ТС", key:"gsmAct", rowspan:true, blocks:[], cells:()=>({
+    A10:gsmActText(), A5:"1 "+MONTHS[m-1]+" "+y+" г.", A13:"Марка/модель: "+String(settings.carModel||"").toUpperCase(), A14:"Гос. рег. Знак:  "+(settings.carPlate||""),
+    A15:"В период: "+fmtDate(dIso(y,m,1))+" - "+fmtDate(dIso(y,m,last)), G19:fmtN(G.total)})}, null)});
+  const used=G.weeks.filter(x=>x.trips.length).map(x=>x.w);
+  pages.push({html:renderSheet({sheet:"Отчёт", key:"gsmRep", rowspan:true, blocks:[], cells:()=>{
+    const c={B3:MONTHS_NOM[m-1]+" "+y+" г.", A4:"Ф.И.О. Работника: "+(settings.fio||""), A5:"Марка автомобиля: "+(settings.carModel||""),
+      A6:"Регистрационный знак:  "+(settings.carPlate||""), C14:String(G.total),
+      A16:"Приложение: маршрутные листы №№ "+(used.length?used:[1]).join(","),
+      A19:FIO().short+"  /__________________/   "+fmtDate(next)+"г.",
+      A24:"  Руководитель СП  /________________/    "+(settings.gsmBoss||"")+"       / «____» ________ "+y+" год."};
+    G.weeks.forEach((x,i)=>{ c["A"+(9+i)]=x.empty ? "" : fmtDate(x.fromIso)+" - "+fmtDate(x.toIso); c["C"+(9+i)]=x.km ? String(x.km) : ""; });
+    return c; }}, null)});
+  refuels(G.month).forEach(r=>{ if(r.photo) pages.push({photo:true, html:`<div class="page" style="padding:48px 60px;font-family:Arial,sans-serif">
+    <div style="font-weight:700;font-size:15pt;margin-bottom:18px">${esc(fmtDate(r.date))}</div>
+    <img src="${r.photo}" style="display:block;margin:0 auto;max-width:100%;max-height:960px"></div>`}); });
+  return pages;
+}
+/* страницы → PDF: каждая рисуется картинкой на свою страницу A4 (маршрутные листы — альбомные) */
+async function pagesToPdf(pages){
+  if(!window.html2canvas) await loadScript("vendor/html2canvas.min.js");
+  if(!window.jspdf) await loadScript("vendor/jspdf.umd.min.js");
+  if(document.fonts) await document.fonts.ready;
+  const box=document.createElement("div"); box.style.cssText="position:fixed;left:-20000px;top:0";
+  document.body.appendChild(box);
+  try{
+    let pdf=null;
+    for(const p of pages){
+      box.innerHTML=p.html; const pg=box.firstElementChild;
+      pg.style.boxShadow="none"; pg.style.transform="none";
+      if(p.land){ pg.style.width="1123px"; pg.style.minHeight="794px"; }
+      pg.querySelectorAll("table.xl").forEach(t=>{ const z=parseFloat(t.style.zoom)||1; t.style.zoom=""; if(z!==1){ t.style.transform="scale("+z+")"; t.style.transformOrigin="0 0"; } });
+      await Promise.all([...pg.querySelectorAll("img")].map(i=>i.complete ? 0 : new Promise(r=>{ i.onload=i.onerror=r; })));
+      const c=await html2canvas(pg, {scale:2, backgroundColor:"#ffffff", logging:false});
+      const [W,H]=p.land ? [297,210] : [210,297];
+      if(!pdf) pdf=new jspdf.jsPDF({unit:"mm", format:"a4", orientation:p.land?"landscape":"portrait", compress:true});
+      else pdf.addPage("a4", p.land?"landscape":"portrait");
+      const h=W*c.height/c.width, k=Math.min(1, H/h);
+      pdf.addImage(c.toDataURL("image/jpeg", 0.9), "JPEG", (W-W*k)/2, 0, W*k, h*k);
+    }
+    return pdf.output("blob");
+  } finally { box.remove(); }
+}
+const gsmName=(month,prefix)=>{ const [y,m]=month.split("-"); return prefix+"_"+m+"_"+y.slice(2); };
+let gsmBusy=false;
+async function makeGsmPdf(){
+  if(gsmBusy) return; gsmBusy=true;
+  try{
+    const month=$("#gsmMonth").value||monthNow(), G=gsmModel(month);
+    if(!G.trips.length && !confirm("За этот месяц в базе нет поездок. Сформировать пустой отчёт?")) return;
+    const over=G.weeks.filter(x=>x.trips.length>7);
+    if(over.length) toast("В маршрутном листе № "+over.map(x=>x.w).join(", ")+" больше 7 поездок — строки добавлены");
+    if(!G.trips.every(t=>t.km)) toast("Не у всех АЗС указано расстояние — пробег 0");
+    toast("Готовлю отчёт…");
+    const blob=await pagesToPdf(gsmPages(G));
+    settings.gsmEnd=Object.assign({}, settings.gsmEnd, {[month]:Math.round(G.end*100)/100}); store.set("settings",settings);
+    const file=new File([blob], gsmName(month, String(settings.fio||"Отчёт").split(/\s+/)[0])+".pdf", {type:"application/pdf"});
+    await saveBlob(file, file.name);
+    if(NATIVE) toast("Сохранено: Загрузки/АЗС/"+file.name);
+  } finally { gsmBusy=false; }
+}
+/* «Маршруты»: для каждой поездки дата и снимок маршрута её АЗС; .docx, альбомный A4 */
+async function makeRoutesDocx(){
+  const month=$("#gsmMonth").value||monthNow(), trips=gsmTrips(month), routes=ref.routes||{};
+  if(!trips.length) return alert("За этот месяц в базе нет поездок.");
+  const miss=uniq(trips.filter(t=>!routes[t.azs]).map(t=>t.azs));
+  if(miss.length && !confirm("Нет снимка маршрута для АЗС "+miss.join(", ")+" — эти поездки будут без картинки. Продолжить?")) return;
+  const zip=new JSZip(), media={}, X=s=>esc(s);
+  let n=0, body="";
+  for(const t of trips){
+    body+=`<w:p><w:r><w:rPr><w:b/><w:sz w:val="28"/></w:rPr><w:t>${X(fmtDate(t.date))}</w:t></w:r></w:p>`;
+    const src=routes[t.azs];
+    if(!src){ body+=`<w:p><w:r><w:t>${X("Маршрут: место парковки ТС — АЗС "+t.azs+" — место парковки ТС")}</w:t></w:r></w:p>`; continue; }
+    if(!media[t.azs]){ const img=await loadImg(await (await fetch(src)).blob()); n++;
+      media[t.azs]={id:"rIdImg"+n, file:"img"+n+".jpg", w:img.naturalWidth||img.width, h:img.naturalHeight||img.height};
+      zip.file("word/media/"+media[t.azs].file, src.split(",")[1], {base64:true}); }
+    const M=media[t.azs], cx=7429500, cy=Math.min(6181725, Math.round(cx*M.h/M.w)), cxx=Math.round(cy*M.w/M.h);
+    body+=`<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cxx}" cy="${cy}"/><wp:docPr id="${body.length}" name="Маршрут АЗС ${X(t.azs)}"/>
+<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+<pic:nvPicPr><pic:cNvPr id="0" name="${M.file}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${M.id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>
+<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cxx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;
+  }
+  zip.file("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="jpg" ContentType="image/jpeg"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`);
+  zip.file("_rels/.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`);
+  zip.file("word/_rels/document.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${Object.values(media).map(M=>`<Relationship Id="${M.id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${M.file}"/>`).join("")}</Relationships>`);
+  zip.file("word/document.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><w:body>${body}<w:sectPr><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/><w:pgMar w:top="567" w:right="567" w:bottom="567" w:left="567" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body></w:document>`);
+  const blob=await zip.generateAsync({type:"blob", mimeType:"application/vnd.openxmlformats-officedocument.wordprocessingml.document", compression:"DEFLATE"});
+  const file=new File([blob], gsmName(month,"Маршруты")+".docx", {type:blob.type});
+  await saveBlob(file, file.name);
+  if(NATIVE) toast("Сохранено: Загрузки/АЗС/"+file.name);
+}
+/* фото (снимок маршрута, чек) — уменьшенная копия JPEG, чтобы данные приложения не разрастались */
+async function photoData(file, maxSide, q){
+  const img=await loadImg(file), k=Math.min(1, maxSide/Math.max(img.naturalWidth||img.width, img.naturalHeight||img.height));
+  const c=document.createElement("canvas"); c.width=Math.round((img.naturalWidth||img.width)*k); c.height=Math.round((img.naturalHeight||img.height)*k);
+  c.getContext("2d").drawImage(img,0,0,c.width,c.height); return c.toDataURL("image/jpeg", q);
+}
+function routeUrl(t){
+  const park=settings.gsmPark||"", a=azsOf(t.azs);
+  return "https://yandex.ru/maps/?rtt=auto&rtext="+encodeURIComponent([park, a.addr||("АЗС "+t.azs), park].join("~"));
+}
+function renderGsm(){
+  const mi=$("#gsmMonth"); if(!mi.value) mi.value=monthNow();
+  const month=mi.value, G=gsmModel(month), routes=ref.routes||{};
+  $("#gsmStart").value = ((settings.gsmStart||{})[month]) ?? "";
+  $("#gsmStart").placeholder = fmtN(gsmStartOf(month));
+  $("#gsmList").innerHTML = G.trips.map(t=>`<div class="li"><div><b>${esc(fmtDate(t.date))} · АЗС ${esc(t.azs)}</b> ${esc(t.reqs.map(r=>"SC00"+r).join(", ")||"ЗИП")}
+      <div class="muted">лист № ${gsmWeekOf(t.date,G.W)} · ${t.km ? tripKm(t)+" км туда и обратно" : "расстояние до АЗС не указано"} · ${routes[t.azs] ? "маршрут есть" : "нет снимка маршрута"}</div></div>
+      <div class="acts"><button class="btn sm" data-route="${esc(t.azs)}" title="Снимок маршрута для этой АЗС">${routes[t.azs]?"🗺 заменить":"🗺 снимок"}</button>
+      <button class="btn sm" data-map="${esc(t.azs)}" title="Открыть маршрут в Яндекс Картах">↗</button></div></div>`).join("")
+    || `<p class="muted">В базе нет актов за этот месяц.</p>`;
+  $("#fuelList").innerHTML = refuels(month).map(r=>`<div class="li"><div><b>${esc(fmtDate(r.date))}</b> · ${esc(fmtN(Number(r.liters)||0))} л <span class="muted">${r.photo?"чек есть":"без фото чека"}</span></div>
+      <div class="acts"><button class="ico del" data-rmfuel="${r.id}" title="Удалить">${ICON_TRASH}</button></div></div>`).join("") || `<p class="muted">Заправок нет.</p>`;
+  $("#gsmInfo").textContent = "Поездок: "+G.trips.length+", пробег "+G.total+" км, расход "+fmtN(G.total*G.rate/100)+" л, заправлено "+fmtN(G.weeks.reduce((s,x)=>s+x.liters,0))+" л. Остаток на конец месяца: "+fmtN(G.end)+" л.";
+}
+let routeFor=null;
+function bindGsm(){
+  $("#gsmMonth").onchange=renderGsm;
+  $("#gsmStart").oninput=e=>{ const month=$("#gsmMonth").value||monthNow();
+    settings.gsmStart=Object.assign({}, settings.gsmStart); const v=e.target.value.trim();
+    if(v==="") delete settings.gsmStart[month]; else settings.gsmStart[month]=v; store.set("settings",settings);
+    $("#gsmInfo").textContent=""; clearTimeout(bindGsm.t); bindGsm.t=setTimeout(renderGsm,600); };
+  $("#gsmList").addEventListener("click",e=>{
+    const b=e.target.closest("button"); if(!b) return;
+    if(b.dataset.map!=null){ const u=routeUrl({azs:b.dataset.map}); NATIVE && Android.openUrl ? Android.openUrl(u) : window.open(u,"_blank"); return; }
+    if(b.dataset.route!=null){ routeFor=b.dataset.route; $("#routeFile").click(); }
+  });
+  $("#routeFile").onchange=async e=>{ const f=e.target.files[0]; e.target.value=""; if(!f || routeFor==null) return;
+    try{ ref.routes=Object.assign({}, ref.routes, {[routeFor]:await photoData(f, 1000, 0.8)}); saveRef(); renderGsm(); toast("Снимок маршрута АЗС "+routeFor+" сохранён"); }
+    catch(err){ alert("Не удалось прочитать снимок: "+err.message); } };
+  $("#fuelAdd").onclick=async()=>{
+    const date=$("#fuelDate").value, liters=Number(String($("#fuelLiters").value).replace(",","."));
+    if(!date || !liters) return toast("Укажите дату и литры");
+    const f=$("#fuelPhoto").files[0];
+    let photo=""; try{ if(f) photo=await photoData(f, 1400, 0.7); }catch(err){ return alert("Не удалось прочитать фото чека: "+err.message); }
+    ref.refuels=(ref.refuels||[]).concat({id:Date.now(), date, liters, photo}); saveRef();
+    $("#fuelLiters").value=""; $("#fuelPhoto").value=""; $("#gsmMonth").value=date.slice(0,7); renderGsm(); toast("Заправка добавлена");
+  };
+  $("#fuelList").addEventListener("click",e=>{ const b=e.target.closest("[data-rmfuel]"); if(!b) return;
+    if(confirm("Удалить заправку?")){ ref.refuels=(ref.refuels||[]).filter(r=>String(r.id)!==b.dataset.rmfuel); saveRef(); renderGsm(); } });
+  $("#gsmPdf").onclick=()=>makeGsmPdf().catch(e=>{ console.error(e); alert("Не удалось сформировать отчёт: "+e.message); });
+  $("#gsmDocx").onclick=()=>makeRoutesDocx().catch(e=>{ console.error(e); alert("Не удалось сформировать маршруты: "+e.message); });
 }
 
 /* ================= Данные ================= */
@@ -893,11 +1144,11 @@ function renderSeals(){
 }
 function renderAzsList(){
   $("#azsList").innerHTML=ref.azs.map((a,i)=>`<div class="azsrow"><div><b>${esc(a.num)}</b> ${esc(a.type)} <span class="muted">${esc(a.addr)}</span></div>
-    <div class="top"><input style="width:76px;flex:0 0 auto" type="number" inputmode="numeric" placeholder="км" data-km="${i}" value="${esc(a.km)}">
+    <div class="top"><input style="width:76px;flex:0 0 auto" type="number" step="0.1" inputmode="decimal" placeholder="км" data-km="${i}" value="${esc(a.km)}">
     <input type="email" multiple inputmode="email" autocapitalize="off" placeholder="почта АЗС" data-email="${i}" value="${esc(a.email)}"></div></div>`).join("");
 }
 function renderData(){
-  ["fio","pos","dept","org","cust","mailTo","replyTo"].forEach(k=>$("#s-"+k).value=settings[k]||"");
+  ["fio","pos","dept","org","cust","mailTo","replyTo","carModel","carPlate","gsmRate","gsmOrg","gsmDept","gsmBoss","gsmRep","gsmProxy","gsmPark"].forEach(k=>$("#s-"+k).value=settings[k]||"");
   const ct=settings.contracts||{};
   $("#contracts").innerHTML=FORMS.map(f=>`<div class="top" style="margin-top:6px"><b style="flex:0 0 58px">${esc(f.title)}</b>
     <input data-cnum="${f.key}" placeholder="№ договора" value="${esc((ct[f.key]||{}).num||"")}">
@@ -914,7 +1165,7 @@ function bindData(){
   $("#contracts").addEventListener("input",e=>{ const k=e.target.dataset.cnum||e.target.dataset.cdate; if(!k) return;
     const ct=settings.contracts=Object.assign({}, settings.contracts); ct[k]=Object.assign({num:"",date:""}, ct[k]);
     ct[k][e.target.dataset.cnum?"num":"date"]=e.target.value.trim(); store.set("settings",settings); });
-  ["fio","pos","dept","org","cust","mailTo","replyTo"].forEach(k=>$("#s-"+k).addEventListener("input",e=>{settings[k]=e.target.value; store.set("settings",settings); if(k==="fio") renderFio();}));
+  ["fio","pos","dept","org","cust","mailTo","replyTo","carModel","carPlate","gsmRate","gsmOrg","gsmDept","gsmBoss","gsmRep","gsmProxy","gsmPark"].forEach(k=>$("#s-"+k).addEventListener("input",e=>{settings[k]=e.target.value; store.set("settings",settings); if(k==="fio") renderFio();}));
   $("#s-autoSeal").onchange=e=>{settings.autoSeal=e.target.checked; store.set("settings",settings);};
   const addSeals=()=>{ const inp=$("#sealAdd"), add=parseSeals(inp.value); if(!add.length) return;
     ref.seals=uniq(ref.seals.concat(add)); saveRef(); inp.value=""; renderSeals(); renderEquip(); toast("Добавлено пломб: "+add.length); };
@@ -1203,7 +1454,8 @@ function showAbout(){
       <li>пломбы и серийные номера — вручную, по штрихкоду/QR или распознаванием текста с фото (без интернета);</li>
       <li>печать, сохранение в PDF${NATIVE?" («Загрузки/АЗС/Акты»)":""} и отправка на почту АЗС;</li>
       <li>база актов с поиском и повтором, справочники АЗС, касс, оборудования, работ и склад пломб;</li>
-      <li>загрузка и выгрузка справочника в Excel, подпись исполнителя по фото, автокопия данных.</li>
+      <li>загрузка и выгрузка справочника в Excel, подпись исполнителя по фото, автокопия данных;</li>
+      <li>отчёт по ГСМ за месяц: маршрутные листы, акт использования ТС, отчёт и чеки (PDF), снимки маршрутов (DOCX).</li>
     </ul>
     <details class="guide"><summary>Инструкция</summary>
       <h4>Перед началом</h4>
@@ -1225,6 +1477,13 @@ function showAbout(){
         <li>Вкладка «Печать»: отметьте нужные акты — ВР, Пломбы, ВБРР, ККТ.</li>
         <li>«Печать» — на принтер; «Сохранить PDF» — ${NATIVE?"в «Загрузки/АЗС/Акты»":"через меню «Поделиться» (например, «Сохранить в Файлы»)"}.</li>
         <li>«✉ На почту» — письмо с PDF: «Кому» — почта АЗС и адреса из настроек, тема — имя файла, в тексте просьба подписать и ссылка для ответа.${NATIVE?"":" На iPhone выберите «Почта» в меню «Поделиться» и вставьте скопированный адрес в «Кому»."}</li>
+      </ol>
+      <h4>Отчёт по ГСМ</h4>
+      <ol>
+        <li>Один раз: «Данные → Исполнитель → Для отчёта по ГСМ» — ФИО начальника, работодатель в лице и доверенность, автомобиль, госномер, норма расхода, место парковки (ФИО, должность и организация — из полей исполнителя); расстояние до каждой АЗС в один конец — «Данные → АЗС».</li>
+        <li>«База → Отчёт по ГСМ»: выберите месяц — поездки берутся из актов. Для каждой АЗС один раз: ↗ откроет маршрут в Яндекс Картах, сделайте снимок экрана и загрузите его кнопкой 🗺.</li>
+        <li>Заправки по топливной карте: дата, литры, фото чека. Остаток на начало месяца переносится с прошлого отчёта, его можно исправить.</li>
+        <li>«Отчёт PDF» — маршрутные листы, акт использования ТС, отчёт и чеки с вашей подписью; «Маршруты DOCX» — даты и снимки маршрутов.</li>
       </ol>
       <h4>База и данные</h4>
       <ol>

@@ -159,7 +159,7 @@ details.drop .chips{max-height:180px;overflow:auto;padding-bottom:10px}
     <div class="row">
       <div><label>Прибытие</label><input type="time" id="f-tArr" step="1800"></div>
       <div><label>Убытие</label><input type="time" id="f-tDep" step="1800"></div>
-      <div><label>Пройдено, км</label><input type="number" inputmode="numeric" id="f-km"></div>
+      <div><label>Пройдено, км</label><input type="number" step="0.1" inputmode="decimal" id="f-km"></div>
     </div>
     <div class="hint">Километраж указывается в один конец (до АЗС) и берётся из справочника АЗС. Изменение здесь действует только для этого акта; в справочник значение записывается, только если там расстояние ещё не указано. Исправить справочник: «Данные → АЗС: расстояния и почта».</div>
   </div>
@@ -207,6 +207,29 @@ details.drop .chips{max-height:180px;overflow:auto;padding-bottom:10px}
 <!-- ================= БАЗА АКТОВ ================= -->
 <section id="tab-db" class="hidden">
   <div class="card">
+    <h2>Отчёт по ГСМ</h2>
+    <div class="row">
+      <div><label>Месяц</label><input type="month" id="gsmMonth"></div>
+      <div><label>Остаток ГСМ на начало, л</label><input type="number" step="0.01" inputmode="decimal" id="gsmStart"></div>
+    </div>
+    <label>Поездки</label>
+    <div class="list" id="gsmList"></div>
+    <label>Заправки по топливной карте</label>
+    <div class="list" id="fuelList"></div>
+    <div class="top" style="margin-top:6px"><input type="date" id="fuelDate" style="flex:0 0 150px"><input type="number" step="0.01" inputmode="decimal" id="fuelLiters" placeholder="литров" style="flex:0 0 90px">
+      <label class="btn sm" style="margin:0">📷 чек<input type="file" id="fuelPhoto" accept="image/*" class="hidden"></label><button class="btn sm" id="fuelAdd">+ Добавить</button></div>
+    <div class="hint" id="gsmInfo"></div>
+    <div class="btns"><button class="btn pri" id="gsmPdf">Отчёт PDF</button><button class="btn pri" id="gsmDocx">Маршруты DOCX</button></div>
+    <div class="hint">Поездки берутся из актов месяца: дата, АЗС, номера заявок, пробег туда и обратно (расстояние в один конец — из акта или «Данные → АЗС»). «Отчёт PDF» — маршрутные листы по неделям, акт использования ТС, отчёт и фото чеков, с вашей подписью. «Маршруты DOCX» — для каждой поездки дата и снимок маршрута: ↗ открывает маршрут в Яндекс Картах, сделайте снимок экрана и загрузите его кнопкой 🗺 (один раз для каждой АЗС). ФИО начальника, автомобиль, норма расхода и шапка — в «Данные → Исполнитель».</div>
+    <input type="file" id="routeFile" accept="image/*" class="hidden">
+  </div>
+    <div class="list" id="gsmList"></div>
+    <div class="hint" id="gsmInfo"></div>
+    <div class="btns"><label class="btn" style="margin:0">Шаблон .xlsx<input type="file" id="gsmTplFile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden"></label>
+      <button class="btn pri" id="gsmMake">Сформировать отчёт</button></div>
+    <div class="hint">Маршрутные листы по неделям, «Отчёт» и «Акт ТС» заполняются по актам месяца: дата, АЗС, номера заявок, пробег туда и обратно (расстояние из акта или «Данные → АЗС»). Шаблон — ваш файл «Шаблон отчётности … .xlsx», загружается один раз.</div>
+  </div>
+  <div class="card">
     <h2>База актов <span class="sp"></span><span class="muted" id="dbCount"></span></h2>
     <input id="dbSearch" placeholder="Поиск: АЗС, заявка, работа, пломба…">
     <div class="list" id="dbList"></div>
@@ -239,6 +262,16 @@ details.drop .chips{max-height:180px;overflow:auto;padding-bottom:10px}
       <button class="btn del" id="signDel">Удалить</button>
     </div>
     <label class="check"><input type="checkbox" id="s-signOn"> Вставлять подпись в акты</label>
+    <label>Для отчёта по ГСМ</label>
+    <div class="muted">ФИО, должность и организация берутся из полей выше; остальное — здесь.</div>
+    <label>ФИО начальника (руководитель СП в отчёте)</label><input id="s-gsmBoss" placeholder="Иванов И.И.">
+    <label>Работодатель в лице (ФИО полностью, акт ТС)</label><input id="s-gsmRep" autocapitalize="words" placeholder="Петров Пётр Петрович">
+    <label>Доверенность (номер и дата)</label><input id="s-gsmProxy" placeholder="ЮГ-1/25 от 01.01.2025">
+    <div class="row"><div><label>Марка автомобиля</label><input id="s-carModel"></div><div><label>Госномер</label><input id="s-carPlate"></div></div>
+    <label>Норма расхода, л/100 км</label><input id="s-gsmRate" inputmode="decimal">
+    <label>Организация (шапка маршрутного листа)</label><input id="s-gsmOrg">
+    <label>Подразделение (шапка маршрутного листа)</label><input id="s-gsmDept">
+    <label>Место парковки ТС (начало и конец маршрута)</label><input id="s-gsmPark">
   </div>
 
   <div class="card">

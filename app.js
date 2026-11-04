@@ -690,8 +690,8 @@ function cellText(v, fmt){
 /* Подпись исполнителя: где на листе стоит (ячейка) и сдвиг от её левого края; накладывается поверх, разметку не меняет */
 function textW(text, font){ const c=textW.c||(textW.c=document.createElement("canvas").getContext("2d")); c.font=font; return c.measureText(text).width; }
 if(document.fonts) ["11pt Carlito","italic 10pt Carlito"].forEach(f=>document.fonts.load(f,"Яя_"));   // иначе первый замер textW идёт по запасному шрифту
-const SIGN_H=34;   // высота подписи в px листа
-function signW(){ return settings.signRatio ? Math.min(SIGN_H*settings.signRatio, 130) : 90; }
+const SIGN_H=41, SIGN_MAXW=156;   // высота и наибольшая ширина подписи в px листа
+function signW(){ return settings.signRatio ? Math.min(SIGN_H*settings.signRatio, SIGN_MAXW) : 108; }
 const LEAD=" ".repeat(53);   // отступ перед «/ ФИО» в ВБРР и ККТ
 const signMid=(start,w)=>start+(w-signW())/2;   // сдвиг, при котором подпись стоит по центру места шириной w
 const lineW=(n,font)=>textW("_".repeat(n),font);
@@ -706,7 +706,7 @@ const SIGN_SPOTS = {
   kkt:  [ {ref:"AT40", x:signCap} ]
 };
 function signImg(spot){
-  return `<img class="sign" src="${settings.sign}" alt="" style="left:${Math.round(spot.x())}px;height:${SIGN_H}px;max-width:130px${spot.mid?";transform:translateY(-50%)":""}">`;
+  return `<img class="sign" src="${settings.sign}" alt="" style="left:${Math.round(spot.x())}px;height:${SIGN_H}px;max-width:${SIGN_MAXW}px${spot.mid?";transform:translateY(-50%)":""}">`;
 }
 
 /* Описание каждого акта: лист, постоянные ячейки и блоки строк, которые растягиваются под число записей */

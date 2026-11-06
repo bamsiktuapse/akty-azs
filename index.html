@@ -227,12 +227,6 @@ details.drop .chips{max-height:180px;overflow:auto;padding-bottom:10px}
     <div class="hint">Поездки берутся из актов месяца: дата, АЗС, номера заявок, пробег туда и обратно (расстояние в один конец — из акта или «Данные → АЗС»). «Отчёт PDF» — маршрутные листы по неделям, акт использования ТС, отчёт и фото чеков, с вашей подписью. «Маршруты DOCX» — для каждой поездки дата и снимок маршрута: ↗ открывает маршрут в Яндекс Картах, сделайте снимок экрана и загрузите его кнопкой 🗺 (один раз для каждой АЗС). ФИО начальника, автомобиль, норма расхода и шапка — в «Данные → Исполнитель».</div>
     <input type="file" id="routeFile" accept="image/*" class="hidden">
   </div>
-    <div class="list" id="gsmList"></div>
-    <div class="hint" id="gsmInfo"></div>
-    <div class="btns"><label class="btn" style="margin:0">Шаблон .xlsx<input type="file" id="gsmTplFile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden"></label>
-      <button class="btn pri" id="gsmMake">Сформировать отчёт</button></div>
-    <div class="hint">Маршрутные листы по неделям, «Отчёт» и «Акт ТС» заполняются по актам месяца: дата, АЗС, номера заявок, пробег туда и обратно (расстояние из акта или «Данные → АЗС»). Шаблон — ваш файл «Шаблон отчётности … .xlsx», загружается один раз.</div>
-  </div>
   <div class="card">
     <h2>База актов <span class="sp"></span><span class="muted" id="dbCount"></span></h2>
     <input id="dbSearch" placeholder="Поиск: АЗС, заявка, работа, пломба…">

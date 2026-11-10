@@ -1139,12 +1139,34 @@ async function photoData(file, maxSide, q){
   const c=document.createElement("canvas"); c.width=Math.round((img.naturalWidth||img.width)*k); c.height=Math.round((img.naturalHeight||img.height)*k);
   c.getContext("2d").drawImage(img,0,0,c.width,c.height); return c.toDataURL("image/jpeg", q);
 }
+/* место парковки: адрес или точка из Яндекс Карт — координаты «широта, долгота» или ссылка на точку (в ссылке ll/pt/whatshere — «долгота,широта») */
+function parkCoords(v){
+  v=String(v||""); let lat, lon;
+  const d=decodeURIComponent(v.replace(/\+/g," ")), u=[/[?&]whatshere\[point\]=/, /[?&]pt=/, /[?&]ll=/]   // точка важнее центра карты (ll)
+    .map(k=>d.match(new RegExp(k.source+/(-?\d+\.\d+),\s*(-?\d+\.\d+)/.source))).find(Boolean);
+  if(u){ lon=+u[1]; lat=+u[2]; }
+  else { const m=v.match(/^\s*(-?\d{1,2}\.\d{3,})\s*[,;\s]\s*(-?\d{1,3}\.\d{3,})\s*$/); if(m){ lat=+m[1]; lon=+m[2]; } }
+  return lat!=null && Math.abs(lat)<=90 && Math.abs(lon)<=180 ? lat.toFixed(6)+","+lon.toFixed(6) : "";
+}
+const openExt=u=>NATIVE && Android.openUrl ? Android.openUrl(u) : window.open(u,"_blank");
+function parkMapUrl(){
+  const v=settings.gsmPark||"", c=parkCoords(v);
+  if(c){ const [lat,lon]=c.split(","); return "https://yandex.ru/maps/?ll="+lon+","+lat+"&z=17&pt="+lon+","+lat; }
+  return "https://yandex.ru/maps/"+(v.trim() ? "?text="+encodeURIComponent(v.trim()) : "");
+}
+function renderPark(){
+  const v=(settings.gsmPark||"").trim(), c=parkCoords(v);
+  $("#parkInfo").textContent = c ? "Точка на карте: "+c.replace(",",", ")+" — маршруты строятся от неё."
+    : /^https?:/i.test(v) ? "В этой ссылке нет координат (короткая ссылка «Поделиться»). Скопируйте координаты точки из её карточки в Яндекс Картах."
+    : v ? "Адрес — Яндекс Карты найдут его сами. Точнее — выбрать точку на карте." : "";
+}
 function routeUrl(t){
-  const park=settings.gsmPark||"", a=azsOf(t.azs);
+  const park=parkCoords(settings.gsmPark) || settings.gsmPark || "", a=azsOf(t.azs);
   return "https://yandex.ru/maps/?rtt=auto&rtext="+encodeURIComponent([park, a.addr||("АЗС "+t.azs), park].join("~"));
 }
 function renderGsm(){
   const mi=$("#gsmMonth"); if(!mi.value) mi.value=monthNow();
+  if(!$("#fuelDate").value) $("#fuelDate").value=today();   // дата заправки по умолчанию — сегодня
   const month=mi.value, G=gsmModel(month), routes=ref.routes||{};
   $("#gsmStart").value = ((settings.gsmStart||{})[month]) ?? "";
   $("#gsmStart").placeholder = fmtN(gsmStartOf(month));
@@ -1154,7 +1176,8 @@ function renderGsm(){
       <button class="btn sm" data-map="${esc(t.azs)}" title="Открыть маршрут в Яндекс Картах">↗</button></div></div>`).join("")
     || `<p class="muted">В базе нет актов за этот месяц.</p>`;
   $("#fuelList").innerHTML = refuels(month).map(r=>`<div class="li"><div><b>${esc(fmtDate(r.date))}</b> · ${esc(fmtN(Number(r.liters)||0))} л <span class="muted">${r.photo?"чек есть":"без фото чека"}</span></div>
-      <div class="acts"><button class="ico del" data-rmfuel="${r.id}" title="Удалить">${ICON_TRASH}</button></div></div>`).join("") || `<p class="muted">Заправок нет.</p>`;
+      <div class="acts"><button class="btn sm" data-fuelph="${r.id}" title="${r.photo?"Заменить":"Добавить"} фото чека">📷${r.photo?" заменить":" чек"}</button>
+      <button class="ico del" data-rmfuel="${r.id}" title="Удалить">${ICON_TRASH}</button></div></div>`).join("") || `<p class="muted">Заправок нет.</p>`;
   $("#gsmInfo").textContent = "Поездок: "+G.trips.length+", пробег "+G.total+" км, расход "+fmtN(G.total*G.rate/100)+" л, заправлено "+fmtN(G.weeks.reduce((s,x)=>s+x.liters,0))+" л. Остаток на конец месяца: "+fmtN(G.end)+" л.";
 }
 let routeFor=null;
@@ -1166,22 +1189,34 @@ function bindGsm(){
     $("#gsmInfo").textContent=""; clearTimeout(bindGsm.t); bindGsm.t=setTimeout(renderGsm,600); };
   $("#gsmList").addEventListener("click",e=>{
     const b=e.target.closest("button"); if(!b) return;
-    if(b.dataset.map!=null){ const u=routeUrl({azs:b.dataset.map}); NATIVE && Android.openUrl ? Android.openUrl(u) : window.open(u,"_blank"); return; }
+    if(b.dataset.map!=null){ openExt(routeUrl({azs:b.dataset.map})); return; }
     if(b.dataset.route!=null){ routeFor=b.dataset.route; $("#routeFile").click(); }
   });
   $("#routeFile").onchange=async e=>{ const f=e.target.files[0]; e.target.value=""; if(!f || routeFor==null) return;
     try{ ref.routes=Object.assign({}, ref.routes, {[routeFor]:await photoData(f, 1000, 0.8)}); saveRef(); renderGsm(); toast("Снимок маршрута АЗС "+routeFor+" сохранён"); }
     catch(err){ alert("Не удалось прочитать снимок: "+err.message); } };
-  $("#fuelAdd").onclick=async()=>{
+  const fuelReady=()=>$("#fuelDate").value && Number(String($("#fuelLiters").value).replace(",","."));
+  const addFuel=async()=>{
     const date=$("#fuelDate").value, liters=Number(String($("#fuelLiters").value).replace(",","."));
     if(!date || !liters) return toast("Укажите дату и литры");
     const f=$("#fuelPhoto").files[0];
     let photo=""; try{ if(f) photo=await photoData(f, 1400, 0.7); }catch(err){ return alert("Не удалось прочитать фото чека: "+err.message); }
     ref.refuels=(ref.refuels||[]).concat({id:Date.now(), date, liters, photo}); saveRef();
-    $("#fuelLiters").value=""; $("#fuelPhoto").value=""; $("#gsmMonth").value=date.slice(0,7); renderGsm(); toast("Заправка добавлена");
+    $("#fuelLiters").value=""; $("#fuelPhoto").value=""; $("#fuelPhotoLbl").textContent="📷 чек";
+    $("#gsmMonth").value=date.slice(0,7); renderGsm(); toast(photo ? "Заправка с фото чека добавлена" : "Заправка добавлена");
   };
-  $("#fuelList").addEventListener("click",e=>{ const b=e.target.closest("[data-rmfuel]"); if(!b) return;
+  $("#fuelAdd").onclick=addFuel;
+  // фото выбрано: видно на кнопке; если дата и литры уже есть — заправка добавляется сразу
+  $("#fuelPhoto").onchange=e=>{ const f=e.target.files[0]; $("#fuelPhotoLbl").textContent=f ? "✓ чек" : "📷 чек"; if(!f) return;
+    if(fuelReady()) addFuel(); else toast("Фото чека выбрано — укажите дату и литры и нажмите «+ Добавить»"); };
+  let fuelFor=null;   // заправка, к которой добавляется фото чека из списка
+  $("#fuelList").addEventListener("click",e=>{
+    const ph=e.target.closest("[data-fuelph]"); if(ph){ fuelFor=ph.dataset.fuelph; const i=$("#fuelPhotoFor"); i.value=""; i.click(); return; }
+    const b=e.target.closest("[data-rmfuel]"); if(!b) return;
     if(confirm("Удалить заправку?")){ ref.refuels=(ref.refuels||[]).filter(r=>String(r.id)!==b.dataset.rmfuel); saveRef(); renderGsm(); } });
+  $("#fuelPhotoFor").onchange=async e=>{ const f=e.target.files[0], r=(ref.refuels||[]).find(x=>String(x.id)===fuelFor); if(!f||!r) return;
+    try{ r.photo=await photoData(f, 1400, 0.7); saveRef(); renderGsm(); toast("Фото чека сохранено"); }
+    catch(err){ alert("Не удалось прочитать фото чека: "+err.message); } };
   $("#gsmPdf").onclick=()=>makeGsmPdf().catch(e=>{ console.error(e); alert("Не удалось сформировать отчёт: "+e.message); });
   $("#gsmDocx").onclick=()=>makeRoutesDocx().catch(e=>{ console.error(e); alert("Не удалось сформировать маршруты: "+e.message); });
 }
@@ -1224,7 +1259,7 @@ function renderData(){
   $("#s-autoSeal").checked=!!settings.autoSeal;
   renderSeals();
   ["works","models","places"].forEach(listEditor);
-  renderEquipBase(); renderAzsList(); renderMiss(); renderGsm();
+  renderEquipBase(); renderAzsList(); renderMiss(); renderGsm(); renderPark();
   $("#refCount").textContent="Сейчас: АЗС "+ref.azs.length+", касс "+ref.kassy.length;
 }
 function bindData(){
@@ -1233,6 +1268,11 @@ function bindData(){
     const ct=settings.contracts=Object.assign({}, settings.contracts); ct[k]=Object.assign({num:"",date:""}, ct[k]);
     ct[k][e.target.dataset.cnum?"num":"date"]=e.target.value.trim(); store.set("settings",settings); });
   ["fio","pos","dept","org","cust","mailTo","replyTo","carModel","carPlate","gsmRate","gsmOrg","gsmDept","gsmBoss","gsmRep","gsmProxy","gsmPark"].forEach(k=>$("#s-"+k).addEventListener("input",e=>{settings[k]=e.target.value; store.set("settings",settings); if(k==="fio") renderFio();}));
+  $("#s-gsmPark").addEventListener("input",e=>{   // вставленная ссылка на точку превращается в координаты
+    const c=/^\s*https?:/i.test(e.target.value) && parkCoords(e.target.value);
+    if(c){ e.target.value=settings.gsmPark=c.replace(",",", "); store.set("settings",settings); }
+    renderPark(); });
+  $("#parkMap").onclick=()=>openExt(parkMapUrl());
   $("#s-autoSeal").onchange=e=>{settings.autoSeal=e.target.checked; store.set("settings",settings);};
   const addSeals=()=>{ const inp=$("#sealAdd"), add=parseSeals(inp.value); if(!add.length) return;
     ref.seals=uniq(ref.seals.concat(add)); saveRef(); inp.value=""; renderSeals(); renderEquip(); toast("Добавлено пломб: "+add.length); };
@@ -1547,7 +1587,7 @@ function showAbout(){
       </ol>
       <h4>Отчёт по ГСМ</h4>
       <ol>
-        <li>Один раз: «Данные → Исполнитель → Для отчёта по ГСМ» — ФИО начальника, работодатель в лице и доверенность, автомобиль, госномер, норма расхода, место парковки (ФИО, должность и организация — из полей исполнителя); расстояние до каждой АЗС в один конец — «Данные → АЗС».</li>
+        <li>Один раз: «Данные → Исполнитель → Для отчёта по ГСМ» — ФИО начальника, работодатель в лице и доверенность, автомобиль, госномер, норма расхода, место парковки — кнопка «🗺 На карте» (ФИО, должность и организация — из полей исполнителя); расстояние до каждой АЗС в один конец — «Данные → АЗС».</li>
         <li>«Данные → Отчёт по ГСМ»: выберите месяц — поездки берутся из актов. Для каждой АЗС один раз: ↗ откроет маршрут в Яндекс Картах, сделайте снимок экрана и загрузите его кнопкой 🗺.</li>
         <li>Заправки по топливной карте: дата, литры, фото чека. Остаток на начало месяца переносится с прошлого отчёта, его можно исправить.</li>
         <li>«Отчёт PDF» — маршрутные листы, акт использования ТС, отчёт и чеки с вашей подписью; «Маршруты DOCX» — даты и снимки маршрутов.</li>

@@ -895,6 +895,21 @@ function mailCfg(){
 }
 const mailReady=()=>NATIVE && !!Android.mailSend && (()=>{ const c=mailCfg(); return c.from && c.smtp.host && c.imap.host && Android.mailHasPass(); })();
 const mailWait={};
+/* отказ во входе — что проверить у своей почты (сервер присылает одно и то же и на неверный пароль, и на выключенный IMAP) */
+function mailWhy(e){
+  const m=String(e && e.message || e);
+  if(!/логин или пароль|AUTHENTICATIONFAILED|535|534/i.test(m)) return m;
+  const d=(mailCfg().from.split("@")[1]||"").toLowerCase(), k=MAIL_DOMAINS[d];
+  const steps = k==="yandex" ? [
+      "Пароль — не от почты, а «пароль приложения»: id.yandex.ru → Безопасность → Пароли приложений → Создать → «Почта». Скопируйте 16 букв целиком.",
+      "В самой Яндекс Почте: ⚙ Все настройки → Почтовые программы → отметьте «С сервера imap.yandex.ru по протоколу IMAP» и «Пароли приложений и OAuth-токены», сохраните.",
+      "Адрес в поле «Ваша почта» — тот же ящик, для которого создан пароль."]
+    : k==="gmail" ? ["Нужен пароль приложения: myaccount.google.com/apppasswords (включается только при двухэтапной проверке).",
+      "В Gmail: Настройки → Пересылка и POP/IMAP → Включить IMAP."]
+    : k==="mailru" ? ["Нужен пароль для внешнего приложения: Mail.ru → Безопасность → Пароли для внешних приложений → «Полный доступ к Почте» (IMAP, SMTP)."]
+    : ["Нужен пароль приложения (не основной пароль от почты); в настройках почты должен быть включён доступ по IMAP и SMTP."];
+  return "почта не приняла вход.\n\nПроверьте:\n"+steps.map((x,i)=>(i+1)+") "+x).join("\n")+"\n\nПотом введите пароль приложения заново.\n\n(Ответ сервера: "+m.replace(/^.*?\(/,"").replace(/\)$/,"")+")";
+}
 window.onMail=(id,err,res)=>{ const p=mailWait[id]; if(!p) return; delete mailWait[id]; err?p.fail(new Error(err)):p.ok(res); };
 function mailCall(kind, p, name){
   return new Promise((ok,fail)=>{ const id="e"+Date.now()+Math.random(); mailWait[id]={ok,fail};
@@ -914,7 +929,7 @@ async function sendDirect(to){
     markAct(id, {mail:{sent:new Date().toISOString(), to, subject}, signed:null});
     toast("Письмо отправлено на "+to.join(", "));
   }catch(e){
-    if(confirm("Не удалось отправить письмо: "+e.message+"\n\nОтправить через почтовое приложение?")) Android.emailPdf(actFileName()+".pdf", to.join(", "), subject, body);
+    if(confirm("Не удалось отправить письмо: "+mailWhy(e)+"\n\nОтправить через почтовое приложение?")) Android.emailPdf(actFileName()+".pdf", to.join(", "), subject, body);
   }
 }
 
@@ -987,7 +1002,7 @@ async function checkReplies(manual){
     renderDb();
     if(done) toast("Подписанных актов получено: "+done+" — сохранены в «Загрузки/АЗС»");
     else if(manual) toast("Ответов с подписанными актами пока нет");
-  }catch(e){ if(manual) alert("Не удалось проверить почту: "+e.message); else console.warn("почта:", e); }
+  }catch(e){ if(manual) alert("Не удалось проверить почту: "+mailWhy(e)); else console.warn("почта:", e); }
   finally{ replyBusy=false; }
 }
 function renderMailCfg(){
@@ -1009,7 +1024,7 @@ function bindMailCfg(){
   ["mailFrom","mailSmtp","mailImap"].forEach(k=>$("#s-"+k).addEventListener("input",()=>setTimeout(renderMailCfg)));   // после записи в settings
   $("#mailTest").onclick=async()=>{ if(!mailReady()) return alert("Укажите адрес и пароль приложения."); const c=mailCfg(); toast("Проверяю…");
     try{ await mailCall("check", {host:c.imap.host, port:c.imap.port, user:c.from, since:imapDate(new Date()), keys:[]}); alert("Вход в почту "+c.from+" выполнен."); }
-    catch(e){ alert("Не удалось войти: "+e.message); } };
+    catch(e){ alert("Не удалось войти: "+mailWhy(e)); } };
 }
 
 function sendMail(){

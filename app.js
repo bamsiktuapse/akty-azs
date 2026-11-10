@@ -23,6 +23,7 @@ const DEFAULT_SETTINGS = {
   cust: "АО «НК «Роснефть»-Кубаньнефтепродукт»",  // заказчик
   contracts: {},       // договоры по актам: {vr:{num,date}, pl:…, vbrr:…, kkt:…}; пусто — строка не печатается
   mailTo: "",          // кому отправлять акты всегда, кроме почты АЗС
+  mailFrom: "", mailSmtp: "", mailImap: "", mailOn: true,   // своя почта для отправки из приложения (пароль — только в Android, см. Mailer.java)
   carModel: "",                // отчёт по ГСМ (заполняется в «Исполнителе»): автомобиль, норма расхода, шапка маршрутных листов
   carPlate: "",
   gsmRate: "12.3",             // л на 100 км
@@ -873,11 +874,153 @@ function mailText(){
     : "Просьба подписать акты, поставить печать, отсканировать и отправить в ответ на это письмо.";
   return {subject, body};
 }
+/* то же письмо в HTML: вместо ссылки — заметная кнопка ответа (уходит только при отправке из приложения) */
+function mailHtml(){
+  const subject=actFileName(), to=replyAddrs(), link="mailto:"+to.join(";")+"?subject="+encodeURIComponent(subject);
+  return `<div style="font-family:Arial,sans-serif;font-size:15px;color:#222">
+<p>Просьба подписать акты, поставить печать, отсканировать и отправить ${to.length ? "по кнопке ниже." : "в ответ на это письмо."}</p>`+
+  (to.length ? `<p style="margin:24px 0"><a href="${esc(link)}" style="display:inline-block;padding:14px 28px;background:#1a73e8;color:#ffffff;font-size:18px;font-weight:bold;text-decoration:none;border-radius:8px">Для ответа нажмите сюда</a></p>
+<p style="font-size:12px;color:#777">Если кнопка не открывается, отправьте ответ с темой «${esc(subject)}» на ${esc(to.join(", "))}</p>` : "")+`</div>`;
+}
+
+/* ================= Почта из приложения (Android): отправка по SMTP и поиск ответов с подписанным актом по IMAP ================= */
+const MAIL_DOMAINS={"yandex.ru":"yandex","ya.ru":"yandex","yandex.com":"yandex","narod.ru":"yandex","gmail.com":"gmail",
+  "mail.ru":"mailru","bk.ru":"mailru","list.ru":"mailru","inbox.ru":"mailru","internet.ru":"mailru","rambler.ru":"rambler"};
+const MAIL_SERVERS={yandex:["smtp.yandex.ru","imap.yandex.ru"], gmail:["smtp.gmail.com","imap.gmail.com"],
+  mailru:["smtp.mail.ru","imap.mail.ru"], rambler:["smtp.rambler.ru","imap.rambler.ru"]};
+function mailCfg(){
+  const from=parseAddrs(settings.mailFrom)[0]||"", known=MAIL_SERVERS[MAIL_DOMAINS[from.split("@")[1]]]||[];
+  const hp=(v,def,port)=>{ const [h,p]=String(v||"").trim().split(":"); return {host:h||def||"", port:+p||port}; };
+  return {from, smtp:hp(settings.mailSmtp,known[0],465), imap:hp(settings.mailImap,known[1],993)};
+}
+const mailReady=()=>NATIVE && !!Android.mailSend && (()=>{ const c=mailCfg(); return c.from && c.smtp.host && c.imap.host && Android.mailHasPass(); })();
+const mailWait={};
+window.onMail=(id,err,res)=>{ const p=mailWait[id]; if(!p) return; delete mailWait[id]; err?p.fail(new Error(err)):p.ok(res); };
+function mailCall(kind, p, name){
+  return new Promise((ok,fail)=>{ const id="e"+Date.now()+Math.random(); mailWait[id]={ok,fail};
+    kind==="send" ? Android.mailSend(id, name, JSON.stringify(p)) : Android.mailCheck(id, JSON.stringify(p)); });
+}
+/* отметка в акте и в его копии в базе */
+function markAct(id, patch){
+  [act, acts.find(a=>a.id===id)].forEach(a=>a && Object.assign(a, patch));
+  saveActs(); saveAct();
+}
+async function sendDirect(to){
+  const c=mailCfg(), {subject, body}=mailText(), id=act.id;
+  if(!confirm("Отправить акт «"+subject+"» с "+c.from+"\nна "+to.join(", ")+"?")) return;
+  toast("Отправляю письмо…");
+  try{
+    await mailCall("send", {host:c.smtp.host, port:c.smtp.port, user:c.from, fromName:FIO().full||"", to, subject, text:body, html:mailHtml(), pdfName:actFileName()+".pdf"}, actFileName()+".pdf");
+    markAct(id, {mail:{sent:new Date().toISOString(), to, subject}, signed:null});
+    toast("Письмо отправлено на "+to.join(", "));
+  }catch(e){
+    if(confirm("Не удалось отправить письмо: "+e.message+"\n\nОтправить через почтовое приложение?")) Android.emailPdf(actFileName()+".pdf", to.join(", "), subject, body);
+  }
+}
+
+/* ---------- разбор письма (MIME) из «двоичной» строки: вложения, тема, отправитель ---------- */
+function mimeWords(s){   // =?UTF-8?B?…?= и =?…?Q?…?=
+  return String(s||"").replace(/\?=\s+=\?/g,"?==?").replace(/=\?([^?]+)\?([bq])\?([^?]*)\?=/gi,(m,cs,enc,t)=>{
+    try{ const bin=enc.toLowerCase()==="b" ? atob(t) : t.replace(/_/g," ").replace(/=([0-9a-f]{2})/gi,(x,h)=>String.fromCharCode(parseInt(h,16)));
+      return new TextDecoder(cs).decode(binBytes(bin)); }catch(e){ return m; } });
+}
+const binBytes=bin=>Uint8Array.from(bin, ch=>ch.charCodeAt(0)&255);
+function mimeParam(h, name){   // filename="…", filename*=UTF-8''…, filename*0*=…
+  const ext=[...String(h||"").matchAll(new RegExp(name+"\\*(\\d+)?\\*?=\"?([^\";]*)\"?","gi"))];
+  if(ext.length){ let v=ext.map(m=>m[2]).join(""); const m=v.match(/^([^']*)'[^']*'(.*)$/);
+    try{ return m ? new TextDecoder(m[1]||"utf-8").decode(binBytes(unescape(m[2]))) : decodeURIComponent(v); }catch(e){ return v; } }
+  const m=String(h||"").match(new RegExp("(?:^|;)\\s*"+name+"=(\"([^\"]*)\"|[^;]+)","i"));
+  return m ? mimeWords((m[2]!=null ? m[2] : m[1]).trim()) : "";
+}
+function mimeParse(bin){
+  const cut=bin.search(/\r?\n\r?\n/), headRaw=cut<0 ? bin : bin.slice(0,cut), body=cut<0 ? "" : bin.slice(cut).replace(/^\r?\n\r?\n/,"");
+  const H={}; headRaw.replace(/\r?\n[ \t]+/g," ").split(/\r?\n/).forEach(l=>{ const i=l.indexOf(":"); if(i>0){ const k=l.slice(0,i).trim().toLowerCase(); if(!(k in H)) H[k]=l.slice(i+1).trim(); } });
+  const ct=H["content-type"]||"text/plain", node={headers:H, type:ct.split(";")[0].trim().toLowerCase(), parts:[]};
+  if(node.type.startsWith("multipart/")){
+    const b=mimeParam(ct,"boundary"); if(!b) return node;
+    const chunks=body.split("--"+b); chunks.shift();
+    for(const c of chunks){ if(/^--/.test(c)) break; node.parts.push(mimeParse(c.replace(/^\r?\n/,"").replace(/\r?\n$/,""))); }
+  } else {
+    const enc=(H["content-transfer-encoding"]||"").toLowerCase();
+    node.data = enc==="base64" ? (()=>{ try{ return atob(body.replace(/[^A-Za-z0-9+/=]/g,"")); }catch(e){ return ""; } })()
+      : enc==="quoted-printable" ? body.replace(/=\r?\n/g,"").replace(/=([0-9A-F]{2})/gi,(x,h)=>String.fromCharCode(parseInt(h,16))) : body;
+    node.filename=mimeParam(H["content-disposition"],"filename") || mimeParam(ct,"name");
+  }
+  return node;
+}
+/* вложения-сканы: PDF и картинки (подпись в теле письма, логотипы мельче 10 КБ — не в счёт) */
+function mimeFiles(node, out=[]){
+  if(node.parts.length) node.parts.forEach(p=>mimeFiles(p,out));
+  else if(node.data!=null && (node.type==="application/pdf" || node.type.startsWith("image/") || /\.(pdf|jpe?g|png|heic|tiff?)$/i.test(node.filename||""))
+          && (node.type==="application/pdf" || node.data.length>10240))
+    out.push({name:node.filename||"", type:node.type, data:node.data});
+  return out;
+}
+const imapDate=d=>d.getDate()+"-"+["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()]+"-"+d.getFullYear();
+let replyBusy=false;
+/* ответы на отправленные акты: письмо во «Входящих» с темой акта, не от себя, с PDF или фото → файл в «Загрузки/АЗС», отметка «подписан» */
+async function checkReplies(manual){
+  if(replyBusy) return;
+  if(!mailReady()){ if(manual) alert("Почта для отправки не настроена: «Данные → Почта для отправки»."); return; }
+  const pend=acts.filter(a=>a.mail && !a.signed);
+  if(!pend.length){ if(manual) toast("Нет отправленных актов, ожидающих ответа"); return; }
+  replyBusy=true; if(manual) toast("Проверяю почту…");
+  try{
+    const c=mailCfg(), since=new Date(Math.min(...pend.map(a=>+new Date(a.mail.sent)))-86400000);
+    const found=JSON.parse(await mailCall("check", {host:c.imap.host, port:c.imap.port, user:c.from, since:imapDate(since), keys:uniq(pend.map(a=>a.mail.subject))}));
+    let done=0;
+    for(const key of uniq(found.map(f=>f.key))){
+      for(const f of found.filter(x=>x.key===key)){
+        const m=mimeParse(atob(f.raw)), from=parseAddrs(mimeWords(m.headers.from))[0]||"";
+        if(from===c.from) continue;   // своё письмо
+        const files=mimeFiles(m); if(!files.length) continue;
+        const names=[];
+        for(let i=0;i<files.length;i++){
+          const x=files[i], ext=(x.name.match(/\.[A-Za-z0-9]{2,5}$/)||[x.type==="application/pdf"?".pdf":x.type==="image/png"?".png":".jpg"])[0];
+          const name=key+" подписан"+(files.length>1?" "+(i+1):"")+ext;
+          await saveBlob(new Blob([binBytes(x.data)],{type:x.type}), name); names.push(name);
+        }
+        pend.filter(a=>a.mail.subject===key).forEach(a=>markAct(a.id, {signed:{date:new Date().toISOString(), from, files:names}}));
+        done++; break;
+      }
+    }
+    renderDb();
+    if(done) toast("Подписанных актов получено: "+done+" — сохранены в «Загрузки/АЗС»");
+    else if(manual) toast("Ответов с подписанными актами пока нет");
+  }catch(e){ if(manual) alert("Не удалось проверить почту: "+e.message); else console.warn("почта:", e); }
+  finally{ replyBusy=false; }
+}
+function renderMailCfg(){
+  if(!$("#mailCfg")) return;
+  $("#mailCfg").classList.toggle("hidden", !(NATIVE && Android.mailSend));
+  $("#mailWeb").classList.toggle("hidden", !!(NATIVE && Android.mailSend));
+  if(!(NATIVE && Android.mailSend)) return;
+  const c=mailCfg();
+  $("#s-mailOn").checked=settings.mailOn!==false;
+  $("#mailPass").placeholder=Android.mailHasPass() ? "сохранён — введите новый, чтобы заменить" : "пароль приложения";
+  $("#s-mailSmtp").placeholder=(c.smtp.host||"smtp-сервер")+":465"; $("#s-mailImap").placeholder=(c.imap.host||"imap-сервер")+":993";
+  const own=c.from && replyAddrs().includes(c.from);
+  $("#mailInfo").textContent = !c.from ? "" : (!c.smtp.host||!c.imap.host) ? "Для этого адреса укажите серверы SMTP и IMAP ниже."
+    : (Android.mailHasPass() ? "Письма уходят с "+c.from+"." : "Введите пароль приложения.")+(own ? "" : " Добавьте "+c.from+" в «Адреса для ответа», иначе подписанные акты придут не к вам и приложение их не увидит.");
+}
+function bindMailCfg(){
+  $("#s-mailOn").onchange=e=>{ settings.mailOn=e.target.checked; store.set("settings",settings); };
+  $("#mailPass").onchange=e=>{ const v=e.target.value.trim(); if(!v) return; Android.mailSetPass(v); e.target.value=""; renderMailCfg(); toast("Пароль сохранён"); };
+  ["mailFrom","mailSmtp","mailImap"].forEach(k=>$("#s-"+k).addEventListener("input",()=>setTimeout(renderMailCfg)));   // после записи в settings
+  $("#mailTest").onclick=async()=>{ if(!mailReady()) return alert("Укажите адрес и пароль приложения."); const c=mailCfg(); toast("Проверяю…");
+    try{ await mailCall("check", {host:c.imap.host, port:c.imap.port, user:c.from, since:imapDate(new Date()), keys:[]}); alert("Вход в почту "+c.from+" выполнен."); }
+    catch(e){ alert("Не удалось войти: "+e.message); } };
+}
+
 function sendMail(){
   if(!FORMS.some(f=>act.forms[f.key])) return toast("Выберите хотя бы один акт");
   saveToDb();
   // кому: почта АЗС из справочника и постоянные адреса из «Данные → Исполнитель»
   const {subject, body}=mailText(), to=uniq(parseAddrs(azsOf(act.azs).email).concat(parseAddrs(settings.mailTo))).join(", ");
+  if(mailReady() && settings.mailOn!==false){
+    if(!to) return alert("Не указано, кому отправлять: добавьте почту АЗС в «Данные → АЗС» или адреса в «Данные → Исполнитель → Кому отправлять акты».");
+    return sendDirect(to.split(", "));
+  }
   if(!to) toast("Не указано, кому отправлять: адрес можно ввести в письме, добавить почту АЗС в «Данные → АЗС» или адреса в «Данные → Исполнитель»");
   if(NATIVE && Android.emailPdf){ toast("Готовлю письмо…"); Android.emailPdf(actFileName()+".pdf", to, subject, body); return; }
   if(MOBILE && navigator.canShare){
@@ -930,6 +1073,11 @@ function repeatAct(src){
 }
 const ICON_REPEAT=`<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>`;
 const ICON_TRASH=`<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg>`;
+function mailState(a){
+  if(a.signed) return `<div class="mailst ok">✓ подписан ${esc(fmtDate(missDay(a.signed)))} — ${esc((a.signed.files||[]).join(", "))} в «Загрузки/АЗС»</div>`;
+  if(a.mail) return `<div class="mailst">✉ отправлен ${esc(fmtDate(missDay({date:a.mail.sent})))}, ждёт подписанный акт</div>`;
+  return "";
+}
 function renderDb(){
   const q=$("#dbSearch").value.toLowerCase();
   const list=acts.slice().sort((a,b)=>(b.date||"").localeCompare(a.date||"") || b.id-a.id)
@@ -937,12 +1085,13 @@ function renderDb(){
   $("#dbCount").textContent=acts.length ? "всего "+acts.length : "";
   $("#dbList").innerHTML = list.map(a=>{ const az=azsOf(a.azs);
     return `<div class="li" data-id="${a.id}"><div><b>${esc(fmtDate(a.date))} · ${esc(a.azs)} ${esc(az.type||"")}</b> ${esc(a.req)}
-      <div class="muted">${esc(a.works.filter(Boolean).join("; ")||a.desc||"—")}</div></div>
+      <div class="muted">${esc(a.works.filter(Boolean).join("; ")||a.desc||"—")}</div>${mailState(a)}</div>
       <div class="acts"><button class="ico rep" data-rep title="Повторить">${ICON_REPEAT}</button><button class="ico del" data-rm title="Удалить">${ICON_TRASH}</button></div></div>`; }).join("")
     || `<p class="muted">${acts.length?"Ничего не найдено":"Сохранённые акты появятся здесь."}</p>`;
 }
 function bindDb(){
   $("#dbSearch").oninput=renderDb;
+  $("#mailCheck").onclick=()=>checkReplies(true);
   $("#dbList").addEventListener("click",e=>{
     const li=e.target.closest(".li"); if(!li) return;
     const b=e.target.closest("button") || {dataset:{}};   // нажатие на сам акт — открыть его
@@ -1249,7 +1398,7 @@ function renderAzsList(){
     <input type="email" multiple inputmode="email" autocapitalize="off" placeholder="почта АЗС" data-email="${i}" value="${esc(a.email)}"></div></div>`).join("");
 }
 function renderData(){
-  ["fio","pos","dept","org","cust","mailTo","replyTo","carModel","carPlate","gsmRate","gsmOrg","gsmDept","gsmBoss","gsmRep","gsmProxy","gsmPark"].forEach(k=>$("#s-"+k).value=settings[k]||"");
+  ["fio","pos","dept","org","cust","mailTo","replyTo","carModel","carPlate","gsmRate","gsmOrg","gsmDept","gsmBoss","gsmRep","gsmProxy","gsmPark","mailFrom","mailSmtp","mailImap"].forEach(k=>$("#s-"+k).value=settings[k]||"");
   const ct=settings.contracts||{};
   $("#contracts").innerHTML=FORMS.map(f=>`<div class="top" style="margin-top:6px"><b style="flex:0 0 58px">${esc(f.title)}</b>
     <input data-cnum="${f.key}" placeholder="№ договора" value="${esc((ct[f.key]||{}).num||"")}">
@@ -1259,15 +1408,15 @@ function renderData(){
   $("#s-autoSeal").checked=!!settings.autoSeal;
   renderSeals();
   ["works","models","places"].forEach(listEditor);
-  renderEquipBase(); renderAzsList(); renderMiss(); renderGsm(); renderPark();
+  renderEquipBase(); renderAzsList(); renderMiss(); renderGsm(); renderPark(); renderMailCfg();
   $("#refCount").textContent="Сейчас: АЗС "+ref.azs.length+", касс "+ref.kassy.length;
 }
 function bindData(){
-  bindMiss(); bindGsm();
+  bindMiss(); bindGsm(); bindMailCfg();
   $("#contracts").addEventListener("input",e=>{ const k=e.target.dataset.cnum||e.target.dataset.cdate; if(!k) return;
     const ct=settings.contracts=Object.assign({}, settings.contracts); ct[k]=Object.assign({num:"",date:""}, ct[k]);
     ct[k][e.target.dataset.cnum?"num":"date"]=e.target.value.trim(); store.set("settings",settings); });
-  ["fio","pos","dept","org","cust","mailTo","replyTo","carModel","carPlate","gsmRate","gsmOrg","gsmDept","gsmBoss","gsmRep","gsmProxy","gsmPark"].forEach(k=>$("#s-"+k).addEventListener("input",e=>{settings[k]=e.target.value; store.set("settings",settings); if(k==="fio") renderFio();}));
+  ["fio","pos","dept","org","cust","mailTo","replyTo","carModel","carPlate","gsmRate","gsmOrg","gsmDept","gsmBoss","gsmRep","gsmProxy","gsmPark","mailFrom","mailSmtp","mailImap"].forEach(k=>$("#s-"+k).addEventListener("input",e=>{settings[k]=e.target.value; store.set("settings",settings); if(k==="fio") renderFio();}));
   $("#s-gsmPark").addEventListener("input",e=>{   // вставленная ссылка на точку превращается в координаты
     const c=/^\s*https?:/i.test(e.target.value) && parkCoords(e.target.value);
     if(c){ e.target.value=settings.gsmPark=c.replace(",",", "); store.set("settings",settings); }
@@ -1584,6 +1733,7 @@ function showAbout(){
         <li>Вкладка «Печать»: отметьте нужные акты — ВР, Пломбы, ВБРР, ККТ.</li>
         <li>«Печать» — на принтер; «Сохранить PDF» — ${NATIVE?"в «Загрузки/АЗС/Акты»":"через меню «Поделиться» (например, «Сохранить в Файлы»)"}.</li>
         <li>«✉ На почту» — письмо с PDF: «Кому» — почта АЗС и адреса из настроек, тема — имя файла, в тексте просьба подписать и ссылка для ответа.${NATIVE?"":" На iPhone выберите «Почта» в меню «Поделиться» и вставьте скопированный адрес в «Кому»."}</li>
+        ${NATIVE?`<li>Отправка прямо из приложения: «Данные → Почта для отправки» — ваш адрес и пароль приложения. Тогда «✉ На почту» отправляет письмо сразу, с кнопкой «Для ответа нажмите сюда»; ответ с подписанным актом приложение находит само (при запуске и по «✉ Проверить ответы» в «Базе») и сохраняет в «Загрузки/АЗС».</li>`:""}
       </ol>
       <h4>Отчёт по ГСМ</h4>
       <ol>
@@ -1659,3 +1809,4 @@ $("#camInput").onchange=e=>onPhoto(e.target.files[0]);
 })();
 bindAct(); bindDb(); bindData(); renderAct();
 setTimeout(()=>checkUpdate(false), 3000);   // проверка обновлений при каждом запуске, без настроек
+setTimeout(()=>checkReplies(false), 8000);   // ответы с подписанными актами — при каждом запуске, без сети молча

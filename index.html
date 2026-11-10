@@ -115,6 +115,8 @@ details.drop .chips{max-height:180px;overflow:auto;padding-bottom:10px}
 .page img.sign{position:absolute;top:50%;transform:translateY(-62%);pointer-events:none}
 .signbox{background:#fff;border:1px dashed var(--line);border-radius:8px;min-height:70px;display:flex;align-items:center;justify-content:center;margin-top:8px}
 .signbox img{max-height:90px;max-width:100%}
+.mailst{font-size:12px;color:#b26a00;margin-top:2px}
+.mailst.ok{color:#1e8e3e}
 .misses{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px;margin-top:8px}
 .miss{position:relative;font-size:12px}
 .miss img{display:block;width:100%;height:90px;object-fit:cover;border-radius:6px;background:#eee}
@@ -212,6 +214,7 @@ details.drop .chips{max-height:180px;overflow:auto;padding-bottom:10px}
 <section id="tab-db" class="hidden">
   <div class="card">
     <h2>База актов <span class="sp"></span><span class="muted" id="dbCount"></span></h2>
+    <div class="btns" style="margin:0 0 8px"><button class="btn sm" id="mailCheck">✉ Проверить ответы</button></div>
     <input id="dbSearch" placeholder="Поиск: АЗС, заявка, работа, пломба…">
     <div class="list" id="dbList"></div>
   </div>
@@ -256,6 +259,22 @@ details.drop .chips{max-height:180px;overflow:auto;padding-bottom:10px}
     <div class="top"><input id="s-gsmPark" placeholder="адрес или координаты точки"><button class="btn sm" id="parkMap">🗺 На карте</button></div>
     <div class="hint" id="parkInfo"></div>
     <div class="muted">«На карте» откроет Яндекс Карты. Нажмите и удерживайте место парковки, в карточке точки нажмите на координаты (они скопируются) и вставьте сюда. Подойдёт и ссылка на точку с координатами.</div>
+  </div>
+
+  <div class="card">
+    <h2>Почта для отправки</h2>
+    <div id="mailWeb" class="muted hidden">Отправка писем из приложения и проверка ответов есть только в версии для Android. Здесь письмо открывается в почтовой программе.</div>
+    <div id="mailCfg">
+      <div class="muted">Акты отправляются прямо из приложения с вашей почты, в письме — крупная кнопка «Для ответа нажмите сюда». При запуске и по кнопке «Проверить ответы» в «Базе» приложение ищет во «Входящих» ответ с подписанным актом, сохраняет его в «Загрузки/АЗС» и отмечает акт подписанным.</div>
+      <label>Ваша почта</label><input id="s-mailFrom" type="email" inputmode="email" autocapitalize="off" placeholder="ivanov@yandex.ru">
+      <label>Пароль приложения</label><input id="mailPass" type="password" autocomplete="new-password">
+      <div class="hint">Не пароль от почты, а отдельный «пароль приложения»: Яндекс — Яндекс ID → Безопасность → Пароли приложений → «Почта» (в настройках почты включите доступ по IMAP); Gmail — myaccount.google.com/apppasswords; Mail.ru — Пароли для внешних приложений. Хранится только в телефоне, в резервные копии не попадает.</div>
+      <div class="hint" id="mailInfo"></div>
+      <div class="row"><div><label>SMTP-сервер</label><input id="s-mailSmtp" autocapitalize="off"></div><div><label>IMAP-сервер</label><input id="s-mailImap" autocapitalize="off"></div></div>
+      <div class="hint">Для Яндекса, Gmail, Mail.ru и Рамблера заполняются сами. Другой сервер — «адрес:порт» (SSL).</div>
+      <label class="check"><input type="checkbox" id="s-mailOn"> Отправлять акты из приложения (иначе — через почтовую программу)</label>
+      <div class="btns"><button class="btn" id="mailTest">Проверить вход</button></div>
+    </div>
   </div>
 
   <div class="card">

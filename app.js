@@ -1185,7 +1185,7 @@ function gsmPages(G){
     pages.push({land:true, html:renderSheet({sheet:"мл №1", key:"gsm", blocks:[{from:6, to:12,
       items:()=>{ const a=x.trips.slice(); while(a.length<7) a.push(null); return a; },
       fill:(t,i)=>t ? {A:i+1, B:{date:t.date}, C:"8:00", D:"0", E:{date:t.date}, F:"17:00", G:"0",
-          H:"Место парковки ТС - АЗС "+t.azs+" - Место парковки ТС", K:t.reqs.map(q=>"SC00"+q).join(", ")||"ЗИП",
+          H:"Место парковки ТС - АЗС "+t.azs+" - Место парковки ТС", K:t.reqs.map(q=>REQ_PREFIX+reqSuffix(q)).join(", ")||"ЗИП",
           L:tripKm(t), M:fmtN(tripKm(t)*G.rate/100), N:sign ? {sign:signMid(0, colsW("мл №1",13,14))} : ""}
         : {A:i+1, C:"8:00", D:"0", F:"17:00", G:"0", L:"0", M:"0,00"}}],
       cells:()=>({A1:"    Маршрутный лист № "+x.w, A2:"на период "+fmtDate(x.fromIso)+" - "+fmtDate(x.toIso), A3:gsmHead(),
@@ -1309,9 +1309,36 @@ function renderPark(){
     : /^https?:/i.test(v) ? "В этой ссылке нет координат (короткая ссылка «Поделиться»). Скопируйте координаты точки из её карточки в Яндекс Картах."
     : v ? "Адрес — Яндекс Карты найдут его сами. Точнее — выбрать точку на карте." : "";
 }
+/* маршрут «парковка → АЗС → парковка»; приложение Яндекс Карт промежуточную точку-адрес не находит, поэтому АЗС — координатами (a.coords) */
 function routeUrl(t){
   const park=parkCoords(settings.gsmPark) || settings.gsmPark || "", a=azsOf(t.azs);
-  return "https://yandex.ru/maps/?rtt=auto&rtext="+encodeURIComponent([park, a.addr||("АЗС "+t.azs), park].join("~"));
+  return "https://yandex.ru/maps/?rtt=auto&rtext="+encodeURIComponent([park, parkCoords(a.coords) || a.addr || ("АЗС "+t.azs), park].join("~"));
+}
+/* точка АЗС на карте: поиск по адресу в Яндекс Картах, координаты вставляются сюда (как у места парковки) */
+function azsPointSheet(num, thenRoute){
+  const a=azsOf(num), q=[a.type, a.addr].filter(Boolean).join(" ") || "АЗС "+num;
+  const bg=sheet("Точка АЗС "+num+" на карте", `<div class="bd"><div class="pad">
+    <div class="muted">${esc(a.addr||"Адрес АЗС не указан")}</div>
+    <p class="hint">Чтобы маршрут шёл через АЗС, у неё должна быть точка на карте. «Найти на карте» откроет Яндекс Карты; нажмите и удерживайте АЗС, в карточке точки нажмите на координаты (они скопируются) и вставьте сюда. Один раз для каждой АЗС.</p>
+    <div class="btns"><button class="btn" data-find>🔎 Найти на карте</button></div>
+    <label>Координаты АЗС</label><input data-c placeholder="44.098790, 39.074512" value="${esc(a.coords||"")}">
+    <div class="hint" data-info></div>
+    <div class="btns"><button class="btn pri" data-ok style="flex:1">${thenRoute?"Сохранить и открыть маршрут":"Сохранить"}</button>
+      ${thenRoute?`<button class="btn" data-skip>Без точки</button>`:""}</div></div></div>`);
+  const inp=bg.querySelector("[data-c]"), info=bg.querySelector("[data-info]");
+  const show=()=>{ const v=inp.value.trim(), c=parkCoords(v);
+    info.textContent = c ? "Точка: "+c.replace(",",", ") : v ? "Не похоже на координаты — нужны два числа «широта, долгота» или ссылка на точку." : ""; };
+  inp.oninput=()=>{ const c=/^\s*https?:/i.test(inp.value) && parkCoords(inp.value); if(c) inp.value=c.replace(",",", "); show(); };
+  show();
+  bg.querySelector("[data-find]").onclick=()=>openExt("https://yandex.ru/maps/?text="+encodeURIComponent(q));
+  bg.querySelector("[data-ok]").onclick=()=>{
+    const v=inp.value.trim(), c=parkCoords(v);
+    if(v && !c) return toast("Не похоже на координаты");
+    const i=ref.azs.findIndex(x=>String(x.num)===String(num));
+    if(i>=0){ ref.azs[i]=Object.assign({}, ref.azs[i], {coords: c ? c.replace(",",", ") : ""}); saveRef(); }
+    bg.remove(); renderGsm(); renderAzsList(); if(c) toast("Точка АЗС "+num+" сохранена");
+    if(thenRoute) openExt(routeUrl({azs:num})); };
+  const skip=bg.querySelector("[data-skip]"); if(skip) skip.onclick=()=>{ bg.remove(); openExt(routeUrl({azs:num})); };
 }
 function renderGsm(){
   const mi=$("#gsmMonth"); if(!mi.value) mi.value=monthNow();
@@ -1319,9 +1346,10 @@ function renderGsm(){
   const month=mi.value, G=gsmModel(month), routes=ref.routes||{};
   $("#gsmStart").value = ((settings.gsmStart||{})[month]) ?? "";
   $("#gsmStart").placeholder = fmtN(gsmStartOf(month));
-  $("#gsmList").innerHTML = G.trips.map(t=>`<div class="li"><div><b>${esc(fmtDate(t.date))} · АЗС ${esc(t.azs)}</b> ${esc(t.reqs.map(r=>"SC00"+r).join(", ")||"ЗИП")}
-      <div class="muted">лист № ${gsmWeekOf(t.date,G.W)} · ${t.km ? tripKm(t)+" км туда и обратно" : "расстояние до АЗС не указано"} · ${routes[t.azs] ? "маршрут есть" : "нет снимка маршрута"}</div></div>
+  $("#gsmList").innerHTML = G.trips.map(t=>`<div class="li"><div><b>${esc(fmtDate(t.date))} · АЗС ${esc(t.azs)}</b> ${esc(t.reqs.map(r=>REQ_PREFIX+reqSuffix(r)).join(", ")||"ЗИП")}
+      <div class="muted">лист № ${gsmWeekOf(t.date,G.W)} · ${t.km ? tripKm(t)+" км туда и обратно" : "расстояние до АЗС не указано"} · ${routes[t.azs] ? "маршрут есть" : "нет снимка маршрута"} · ${parkCoords(azsOf(t.azs).coords) ? "точка АЗС есть" : "нет точки АЗС"}</div></div>
       <div class="acts"><button class="btn sm" data-route="${esc(t.azs)}" title="Снимок маршрута для этой АЗС">${routes[t.azs]?"🗺 заменить":"🗺 снимок"}</button>
+      <button class="btn sm" data-pt="${esc(t.azs)}" title="Точка АЗС на карте">📍</button>
       <button class="btn sm" data-map="${esc(t.azs)}" title="Открыть маршрут в Яндекс Картах">↗</button></div></div>`).join("")
     || `<p class="muted">В базе нет актов за этот месяц.</p>`;
   $("#fuelList").innerHTML = refuels(month).map(r=>`<div class="li" data-fuel="${r.id}" style="cursor:pointer"><div><b>${esc(fmtDate(r.date))}</b> · ${esc(fmtN(Number(r.liters)||0))} л <span class="muted">${r.photo?"чек есть":"без фото чека"}</span></div>
@@ -1330,6 +1358,7 @@ function renderGsm(){
   $("#gsmInfo").textContent = "Поездок: "+G.trips.length+", пробег "+G.total+" км, расход "+fmtN(G.total*G.rate/100)+" л, заправлено "+fmtN(G.weeks.reduce((s,x)=>s+x.liters,0))+" л. Остаток на конец месяца: "+fmtN(G.end)+" л.";
 }
 let routeFor=null;
+window.onRouteShot=(azs, data)=>{ ref.routes=Object.assign({}, ref.routes, {[azs]:data}); saveRef(); renderGsm(); toast("Снимок маршрута АЗС "+azs+" сохранён"); };
 function bindGsm(){
   $("#gsmMonth").onchange=renderGsm;
   $("#gsmStart").oninput=e=>{ const month=$("#gsmMonth").value||monthNow();
@@ -1338,8 +1367,14 @@ function bindGsm(){
     $("#gsmInfo").textContent=""; clearTimeout(bindGsm.t); bindGsm.t=setTimeout(renderGsm,600); };
   $("#gsmList").addEventListener("click",e=>{
     const b=e.target.closest("button"); if(!b) return;
-    if(b.dataset.map!=null){ openExt(routeUrl({azs:b.dataset.map})); return; }
-    if(b.dataset.route!=null){ routeFor=b.dataset.route; $("#routeFile").click(); }
+    if(b.dataset.map!=null){ const n=b.dataset.map; parkCoords(azsOf(n).coords) ? openExt(routeUrl({azs:n})) : azsPointSheet(n, true); return; }
+    if(b.dataset.pt!=null){ azsPointSheet(b.dataset.pt, false); return; }
+    if(b.dataset.route!=null){ routeFor=b.dataset.route;
+      // Android: снимок прямо с десктопной версии Яндекс Карт; иначе — загрузить готовый снимок экрана
+      if(NATIVE && Android.mapShot){
+        if(!parkCoords(azsOf(routeFor).coords) && !confirm("У АЗС "+routeFor+" нет точки на карте — маршрут может пройти мимо неё. Продолжить?")) return azsPointSheet(routeFor, false);
+        Android.mapShot(routeFor, routeUrl({azs:routeFor}), "Маршрут: парковка → АЗС "+routeFor+" → парковка"); }
+      else $("#routeFile").click(); }
   });
   $("#routeFile").onchange=async e=>{ const f=e.target.files[0]; e.target.value=""; if(!f || routeFor==null) return;
     try{ ref.routes=Object.assign({}, ref.routes, {[routeFor]:await photoData(f, 1000, 0.8)}); saveRef(); renderGsm(); toast("Снимок маршрута АЗС "+routeFor+" сохранён"); }
@@ -1420,9 +1455,15 @@ function renderSeals(){
   $("#sealList").innerHTML=sortSeals(ref.seals).map(x=>`<span class="chip">${esc(x)}<button class="x" data-rmseal="${esc(x)}" title="Убрать">✕</button></span>`).join("")||`<span class="muted">Склад пуст</span>`;
 }
 function renderAzsList(){
-  $("#azsList").innerHTML=ref.azs.map((a,i)=>`<div class="azsrow"><div><b>${esc(a.num)}</b> ${esc(a.type)} <span class="muted">${esc(a.addr)}</span></div>
+  $("#azsList").innerHTML=ref.azs.map((a,i)=>`<div class="azsrow"><div class="top"><b style="flex:0 0 auto">АЗС ${esc(a.num)}</b>
+      <input style="width:90px;flex:0 0 auto" placeholder="тип" data-f="type" data-i="${i}" value="${esc(a.type)}"><span style="flex:1"></span>
+      <button class="ico del" data-rmazs="${i}" title="Удалить АЗС">${ICON_TRASH}</button></div>
+    <div class="top"><input placeholder="адрес" data-f="addr" data-i="${i}" value="${esc(a.addr)}"></div>
+    <div class="top"><input placeholder="координаты: широта, долгота" data-f="coords" data-i="${i}" value="${esc(a.coords||"")}">
+      <button class="btn sm" data-azspt="${esc(a.num)}" title="Найти на карте и вставить координаты">📍</button></div>
     <div class="top"><input style="width:76px;flex:0 0 auto" type="number" step="0.1" inputmode="decimal" placeholder="км" data-km="${i}" value="${esc(a.km)}">
-    <input type="email" multiple inputmode="email" autocapitalize="off" placeholder="почта АЗС" data-email="${i}" value="${esc(a.email)}"></div></div>`).join("");
+    <input type="email" multiple inputmode="email" autocapitalize="off" placeholder="почта АЗС" data-email="${i}" value="${esc(a.email)}"></div></div>`).join("")
+    || `<p class="muted">Список АЗС пуст.</p>`;
 }
 function renderData(){
   ["fio","pos","dept","org","cust","mailTo","replyTo","carModel","carPlate","gsmRate","gsmOrg","gsmDept","gsmBoss","gsmRep","gsmProxy","gsmPark","mailFrom","mailSmtp","mailImap"].forEach(k=>$("#s-"+k).value=settings[k]||"");
@@ -1470,7 +1511,20 @@ function bindData(){
     if(b.dataset.rmeq!=null){ ref.equipBase.splice(+b.dataset.rmeq,1); saveRef(); renderEquipBase(); }
   });
   $("#eqbAzs").onchange=renderEquipBase;
+  $("#azsList").addEventListener("click",e=>{
+    const pt=e.target.closest("[data-azspt]"); if(pt) return azsPointSheet(pt.dataset.azspt, false);
+    const rm=e.target.closest("[data-rmazs]"); if(!rm) return; const a=ref.azs[+rm.dataset.rmazs];
+    if(!confirm("Удалить АЗС "+a.num+" из списка? Акты по ней в базе останутся.")) return;
+    ref.azs.splice(+rm.dataset.rmazs,1); saveRef(); renderAzsList(); fillAzsSelect($("#f-azs"), act.azs); renderAzsInfo(); });
+  $("#azsAdd").onclick=()=>{ const inp=$("#azsNew"), num=inp.value.trim(); if(!num) return toast("Укажите номер АЗС");
+    if(ref.azs.some(a=>String(a.num)===num)) return toast("АЗС "+num+" уже есть в списке");
+    ref.azs.push({num, type:"", addr:"", km:"", email:"", coords:""}); ref.azs.sort((a,b)=>String(a.num).localeCompare(String(b.num),"ru",{numeric:true})); saveRef();
+    inp.value=""; renderAzsList(); fillAzsSelect($("#f-azs"), act.azs); toast("АЗС "+num+" добавлена — укажите адрес или координаты"); };
   $("#azsList").addEventListener("change",e=>{
+    const f=e.target.dataset.f, fi=e.target.dataset.i;
+    if(f){ const a=ref.azs[+fi]; let v=e.target.value.trim();
+      if(f==="coords" && v){ const c=parkCoords(v); if(!c) return toast("Не похоже на координаты — нужны «широта, долгота» или ссылка на точку"); v=e.target.value=c.replace(",",", "); }
+      a[f]=v; saveRef(); renderAzsInfo(); return; }
     const em=e.target.dataset.email; if(em!=null){ ref.azs[+em].email=e.target.value.trim(); saveRef(); renderAzsInfo(); return; }
     const i=e.target.dataset.km; if(i==null) return; ref.azs[+i].km=e.target.value; saveRef();
     if(String(ref.azs[+i].num)===String(act.azs)){ act.km=e.target.value; saveAct(); } });
@@ -1526,7 +1580,7 @@ async function importXlsx(file){
 
 /* Простой формат: на каждом листе первая строка — заголовки, столбцы ищутся по названию (порядок любой). */
 const SIMPLE = {
-  "АЗС":          { num:["№ азс","номер азс","азс"], type:["тип"], addr:["адрес"], boss:["управляющ"], phone:["телефон азс","раб. телефон","телефон"], bossPhone:["телефон управляющ"], km:["км","километр","расстоян"], email:["почт","e-mail","email"] },
+  "АЗС":          { num:["№ азс","номер азс","азс"], type:["тип"], addr:["адрес"], boss:["управляющ"], phone:["телефон азс","раб. телефон","телефон"], bossPhone:["телефон управляющ"], km:["км","километр","расстоян"], email:["почт","e-mail","email"], coords:["координат"] },
   "Кассы":        { azs:["№ азс","азс"], n:["№ кассы","касса"], zn:["зн"], rn:["рн"], model:["модель"], sn:["s/n","серийн"], tid:["id"] },
   "Оборудование": { model:["модель","наименование"], sn:["серийн","s/n"], azs:["азс","место"] },
   "Склад пломб":  { seal:["пломб","номер"] },
@@ -1550,7 +1604,7 @@ async function importSimple(read, maxRow){
   const done=[];
   const A=await table("АЗС");
   if(A){ const old=ref.azs; ref.azs=A.filter(a=>a.num).map(a=>{ const p=old.find(x=>String(x.num)===String(a.num))||{};
-      return Object.assign({}, p, a, {km: a.km || p.km || "", email: a.email || p.email || ""}); }); done.push("АЗС "+ref.azs.length); }
+      return Object.assign({}, p, a, {km: a.km || p.km || "", email: a.email || p.email || "", coords: a.coords || p.coords || ""}); }); done.push("АЗС "+ref.azs.length); }
   const K=await table("Кассы");
   if(K){ ref.kassy=K.filter(k=>k.azs&&k.n); done.push("касс "+ref.kassy.length); }
   const E=await table("Оборудование");
@@ -1590,8 +1644,8 @@ function refSheets(){
   const withSn=new Set(ref.equipBase.map(e=>e.model));
   return [
     {name:"Инструкция", plain:true, widths:[120], rows:REF_HELP},
-    {name:"АЗС", headers:["№ АЗС","Тип","Адрес","Управляющий","Телефон АЗС","Телефон управляющего","Км в один конец","Почта"], widths:[9,8,55,32,18,20,12,30], wrap:[2],
-     rows:ref.azs.map(a=>[a.num,a.type,a.addr,a.boss,a.phone,a.bossPhone,a.km,a.email])},
+    {name:"АЗС", headers:["№ АЗС","Тип","Адрес","Управляющий","Телефон АЗС","Телефон управляющего","Км в один конец","Почта","Координаты"], widths:[9,8,55,32,18,20,12,30,22], wrap:[2],
+     rows:ref.azs.map(a=>[a.num,a.type,a.addr,a.boss,a.phone,a.bossPhone,a.km,a.email,a.coords||""])},
     {name:"Кассы", headers:["№ АЗС","№ кассы","ЗН ККТ","РН ККТ","Модель терминала","S/N терминала","ID терминала"], widths:[9,9,17,17,18,28,13],
      rows:ref.kassy.map(k=>[k.azs,k.n,k.zn,k.rn,k.model,k.sn,k.tid])},
     {name:"Оборудование", headers:["Модель","Серийный номер","№ АЗС / место"], widths:[42,30,16],
@@ -1746,7 +1800,7 @@ function showAbout(){
         <li>«Данные → Исполнитель»: ФИО, должность, подразделение, организация, заказчик, номера договоров, фото подписи.</li>
         <li>Там же — <b>«Кому отправлять акты»</b> (адреса в поле «Кому» каждого письма, вместе с почтой АЗС) и <b>«Адреса для ответа на письмо»</b> (куда АЗС вернёт подписанные акты). Несколько адресов — через запятую.</li>
         <li>Справочник АЗС, касс и оборудования: «Данные → Справочник Excel → Загрузить .xlsx».${NATIVE?"":" В веб-версии справочник изначально пуст — загрузите его или восстановите резервную копию с Android."}</li>
-        <li>Почту и расстояние до каждой АЗС — «Данные → АЗС: расстояния и почта».</li>
+        <li>Почту и расстояние до каждой АЗС — «Данные → АЗС: адреса, расстояния и почта».</li>
       </ol>
       <h4>Акт</h4>
       <ol>
@@ -1765,7 +1819,7 @@ function showAbout(){
       <h4>Отчёт по ГСМ</h4>
       <ol>
         <li>Один раз: «Данные → Исполнитель → Для отчёта по ГСМ» — ФИО начальника, работодатель в лице и доверенность, автомобиль, госномер, норма расхода, место парковки — кнопка «🗺 На карте» (ФИО, должность и организация — из полей исполнителя); расстояние до каждой АЗС в один конец — «Данные → АЗС».</li>
-        <li>«Данные → Отчёт по ГСМ»: выберите месяц — поездки берутся из актов. Для каждой АЗС один раз: ↗ откроет маршрут в Яндекс Картах, сделайте снимок экрана и загрузите его кнопкой 🗺.</li>
+        <li>«Данные → Отчёт по ГСМ»: выберите месяц — поездки берутся из актов. Для каждой АЗС один раз: 📍 — точка АЗС на карте (координаты, чтобы маршрут шёл через неё), ↗ откроет маршрут в Яндекс Картах, сделайте снимок экрана и загрузите его кнопкой 🗺.</li>
         <li>Заправки по топливной карте: дата, литры, фото чека. Остаток на начало месяца переносится с прошлого отчёта, его можно исправить.</li>
         <li>«Отчёт PDF» — маршрутные листы, акт использования ТС, отчёт и чеки с вашей подписью; «Маршруты DOCX» — даты и снимки маршрутов.</li>
       </ol>

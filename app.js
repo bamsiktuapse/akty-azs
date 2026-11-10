@@ -940,11 +940,9 @@ function renderDb(){
       <div class="muted">${esc(a.works.filter(Boolean).join("; ")||a.desc||"—")}</div></div>
       <div class="acts"><button class="ico rep" data-rep title="Повторить">${ICON_REPEAT}</button><button class="ico del" data-rm title="Удалить">${ICON_TRASH}</button></div></div>`; }).join("")
     || `<p class="muted">${acts.length?"Ничего не найдено":"Сохранённые акты появятся здесь."}</p>`;
-  renderGsm();
 }
 function bindDb(){
   $("#dbSearch").oninput=renderDb;
-  bindGsm();
   $("#dbList").addEventListener("click",e=>{
     const li=e.target.closest(".li"); if(!li) return;
     const b=e.target.closest("button") || {dataset:{}};   // нажатие на сам акт — открыть его
@@ -1226,11 +1224,11 @@ function renderData(){
   $("#s-autoSeal").checked=!!settings.autoSeal;
   renderSeals();
   ["works","models","places"].forEach(listEditor);
-  renderEquipBase(); renderAzsList(); renderMiss();
+  renderEquipBase(); renderAzsList(); renderMiss(); renderGsm();
   $("#refCount").textContent="Сейчас: АЗС "+ref.azs.length+", касс "+ref.kassy.length;
 }
 function bindData(){
-  bindMiss();
+  bindMiss(); bindGsm();
   $("#contracts").addEventListener("input",e=>{ const k=e.target.dataset.cnum||e.target.dataset.cdate; if(!k) return;
     const ct=settings.contracts=Object.assign({}, settings.contracts); ct[k]=Object.assign({num:"",date:""}, ct[k]);
     ct[k][e.target.dataset.cnum?"num":"date"]=e.target.value.trim(); store.set("settings",settings); });
@@ -1550,7 +1548,7 @@ function showAbout(){
       <h4>Отчёт по ГСМ</h4>
       <ol>
         <li>Один раз: «Данные → Исполнитель → Для отчёта по ГСМ» — ФИО начальника, работодатель в лице и доверенность, автомобиль, госномер, норма расхода, место парковки (ФИО, должность и организация — из полей исполнителя); расстояние до каждой АЗС в один конец — «Данные → АЗС».</li>
-        <li>«База → Отчёт по ГСМ»: выберите месяц — поездки берутся из актов. Для каждой АЗС один раз: ↗ откроет маршрут в Яндекс Картах, сделайте снимок экрана и загрузите его кнопкой 🗺.</li>
+        <li>«Данные → Отчёт по ГСМ»: выберите месяц — поездки берутся из актов. Для каждой АЗС один раз: ↗ откроет маршрут в Яндекс Картах, сделайте снимок экрана и загрузите его кнопкой 🗺.</li>
         <li>Заправки по топливной карте: дата, литры, фото чека. Остаток на начало месяца переносится с прошлого отчёта, его можно исправить.</li>
         <li>«Отчёт PDF» — маршрутные листы, акт использования ТС, отчёт и чеки с вашей подписью; «Маршруты DOCX» — даты и снимки маршрутов.</li>
       </ol>
@@ -1583,6 +1581,13 @@ function go(tab){
   if(tab==="act") renderEquip(); if(tab==="print") renderPrint(); if(tab==="data") renderData(); if(tab==="db") renderDb();
 }
 document.querySelectorAll("[data-go]").forEach(b=>b.addEventListener("click",()=>go(b.dataset.go)));
+/* кнопка «Назад» Android (MainActivity.onBackPressed): закрывает открытое окно, с других вкладок ведёт на «Акт»;
+   false — уже на «Акте», приложение спросит о выходе */
+window.onBack=()=>{
+  const s=document.querySelectorAll(".sheet-bg"); if(s.length){ s[s.length-1].remove(); return true; }
+  if($("#tab-act").classList.contains("hidden")){ go("act"); return true; }
+  return false;
+};
 document.querySelectorAll("[data-form]").forEach(c=>c.addEventListener("click",()=>{ act.forms[c.dataset.form]=!act.forms[c.dataset.form]; saveAct(); renderPrint(); }));
 $("#btnAbout").onclick=showAbout;
 $("#btnPrint").onclick=printActs; $("#btnPdf").onclick=savePdf; $("#btnMail").onclick=sendMail;

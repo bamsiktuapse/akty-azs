@@ -1324,7 +1324,7 @@ function renderGsm(){
       <div class="acts"><button class="btn sm" data-route="${esc(t.azs)}" title="Снимок маршрута для этой АЗС">${routes[t.azs]?"🗺 заменить":"🗺 снимок"}</button>
       <button class="btn sm" data-map="${esc(t.azs)}" title="Открыть маршрут в Яндекс Картах">↗</button></div></div>`).join("")
     || `<p class="muted">В базе нет актов за этот месяц.</p>`;
-  $("#fuelList").innerHTML = refuels(month).map(r=>`<div class="li"><div><b>${esc(fmtDate(r.date))}</b> · ${esc(fmtN(Number(r.liters)||0))} л <span class="muted">${r.photo?"чек есть":"без фото чека"}</span></div>
+  $("#fuelList").innerHTML = refuels(month).map(r=>`<div class="li" data-fuel="${r.id}" style="cursor:pointer"><div><b>${esc(fmtDate(r.date))}</b> · ${esc(fmtN(Number(r.liters)||0))} л <span class="muted">${r.photo?"чек есть":"без фото чека"}</span></div>
       <div class="acts"><button class="btn sm" data-fuelph="${r.id}" title="${r.photo?"Заменить":"Добавить"} фото чека">📷${r.photo?" заменить":" чек"}</button>
       <button class="ico del" data-rmfuel="${r.id}" title="Удалить">${ICON_TRASH}</button></div></div>`).join("") || `<p class="muted">Заправок нет.</p>`;
   $("#gsmInfo").textContent = "Поездок: "+G.trips.length+", пробег "+G.total+" км, расход "+fmtN(G.total*G.rate/100)+" л, заправлено "+fmtN(G.weeks.reduce((s,x)=>s+x.liters,0))+" л. Остаток на конец месяца: "+fmtN(G.end)+" л.";
@@ -1358,13 +1358,40 @@ function bindGsm(){
   // фото выбрано: видно на кнопке; если дата и литры уже есть — заправка добавляется сразу
   $("#fuelPhoto").onchange=e=>{ const f=e.target.files[0]; $("#fuelPhotoLbl").textContent=f ? "✓ чек" : "📷 чек"; if(!f) return;
     if(fuelReady()) addFuel(); else toast("Фото чека выбрано — укажите дату и литры и нажмите «+ Добавить»"); };
-  let fuelFor=null;   // заправка, к которой добавляется фото чека из списка
+  let fuelFor=null, fuelSheet=null;   // заправка, к которой добавляется фото чека; открытое окно заправки
+  const fuelOf=id=>(ref.refuels||[]).find(x=>String(x.id)===String(id));
+  const pickFuelPhoto=id=>{ fuelFor=id; const i=$("#fuelPhotoFor"); i.value=""; i.click(); };
+  const rmFuel=id=>{ if(!confirm("Удалить заправку?")) return false; ref.refuels=(ref.refuels||[]).filter(r=>String(r.id)!==String(id)); saveRef(); renderGsm(); return true; };
+  /* окно заправки: чек целиком, правка даты и литров, замена или удаление фото */
+  function openFuel(id){
+    const r=fuelOf(id); if(!r) return;
+    const bg=sheet("Заправка "+fmtDate(r.date), `<div class="bd"><div class="pad">
+      <div data-ph></div>
+      <div class="row"><div><label>Дата</label><input type="date" data-date value="${esc(r.date)}"></div>
+        <div><label>Литров</label><input type="number" step="0.01" inputmode="decimal" data-lit value="${esc(r.liters)}"></div></div>
+      <div class="btns"><button class="btn" data-newph></button><button class="btn del hidden" data-noph>Удалить фото</button></div>
+      <div class="btns"><button class="btn pri" data-save style="flex:1">Сохранить</button><button class="btn del" data-rm>Удалить заправку</button></div></div></div>`);
+    const drawPh=()=>{ const x=fuelOf(id)||{};
+      bg.querySelector("[data-ph]").innerHTML = x.photo ? `<img src="${x.photo}" alt="чек" style="display:block;width:100%;border-radius:8px;border:1px solid var(--line)">`
+        : `<p class="muted">Фото чека нет.</p>`;
+      bg.querySelector("[data-newph]").textContent = x.photo ? "📷 Заменить фото" : "📷 Добавить фото чека";
+      bg.querySelector("[data-noph]").classList.toggle("hidden", !x.photo); };
+    drawPh(); fuelSheet={id, bg, drawPh};
+    bg.querySelector("[data-newph]").onclick=()=>pickFuelPhoto(id);
+    bg.querySelector("[data-noph]").onclick=()=>{ if(!confirm("Удалить фото чека?")) return; fuelOf(id).photo=""; saveRef(); renderGsm(); drawPh(); };
+    bg.querySelector("[data-save]").onclick=()=>{
+      const date=bg.querySelector("[data-date]").value, liters=Number(String(bg.querySelector("[data-lit]").value).replace(",","."));
+      if(!date || !liters) return toast("Укажите дату и литры");
+      Object.assign(fuelOf(id), {date, liters}); saveRef(); $("#gsmMonth").value=date.slice(0,7); renderGsm(); bg.remove(); toast("Заправка сохранена"); };
+    bg.querySelector("[data-rm]").onclick=()=>{ if(rmFuel(id)) bg.remove(); };
+  }
   $("#fuelList").addEventListener("click",e=>{
-    const ph=e.target.closest("[data-fuelph]"); if(ph){ fuelFor=ph.dataset.fuelph; const i=$("#fuelPhotoFor"); i.value=""; i.click(); return; }
-    const b=e.target.closest("[data-rmfuel]"); if(!b) return;
-    if(confirm("Удалить заправку?")){ ref.refuels=(ref.refuels||[]).filter(r=>String(r.id)!==b.dataset.rmfuel); saveRef(); renderGsm(); } });
-  $("#fuelPhotoFor").onchange=async e=>{ const f=e.target.files[0], r=(ref.refuels||[]).find(x=>String(x.id)===fuelFor); if(!f||!r) return;
-    try{ r.photo=await photoData(f, 1400, 0.7); saveRef(); renderGsm(); toast("Фото чека сохранено"); }
+    const ph=e.target.closest("[data-fuelph]"); if(ph) return pickFuelPhoto(ph.dataset.fuelph);
+    const b=e.target.closest("[data-rmfuel]"); if(b) return rmFuel(b.dataset.rmfuel);
+    const li=e.target.closest("[data-fuel]"); if(li) openFuel(li.dataset.fuel); });
+  $("#fuelPhotoFor").onchange=async e=>{ const f=e.target.files[0], r=fuelOf(fuelFor); if(!f||!r) return;
+    try{ r.photo=await photoData(f, 1400, 0.7); saveRef(); renderGsm(); toast("Фото чека сохранено");
+      if(fuelSheet && String(fuelSheet.id)===String(r.id) && fuelSheet.bg.isConnected) fuelSheet.drawPh(); }
     catch(err){ alert("Не удалось прочитать фото чека: "+err.message); } };
   $("#gsmPdf").onclick=()=>makeGsmPdf().catch(e=>{ console.error(e); alert("Не удалось сформировать отчёт: "+e.message); });
   $("#gsmDocx").onclick=()=>makeRoutesDocx().catch(e=>{ console.error(e); alert("Не удалось сформировать маршруты: "+e.message); });

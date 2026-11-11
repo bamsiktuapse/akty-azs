@@ -988,6 +988,7 @@ async function checkReplies(manual){
       for(const f of found.filter(x=>x.key===key)){
         const m=mimeParse(atob(f.raw)), from=parseAddrs(mimeWords(m.headers.from))[0]||"";
         if(from===c.from) continue;   // своё письмо
+        if(!mimeWords(m.headers.subject||"").includes(key)) continue;   // сервер мог искать по части темы
         const files=mimeFiles(m); if(!files.length) continue;
         const names=[];
         for(let i=0;i<files.length;i++){

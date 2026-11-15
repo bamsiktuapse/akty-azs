@@ -33,7 +33,7 @@ const DEFAULT_SETTINGS = {
   gsmRep: "", gsmProxy: "",    // «Акт ТС»: работодатель в лице (ФИО) и доверенность
   gsmPark: "",                 // место парковки ТС — начало и конец маршрута
   gsmStart: {}, gsmEnd: {},    // остаток ГСМ по месяцам: введённый на начало и рассчитанный на конец
-  replyTo: '"DV_Melnikov6@sibsoft.rosneft.ru" <dv_melnikov6@sibsoft.rosneft.ru>, paveletmekchyan@yandex.ru',   // куда АЗС отправляет подписанные акты
+  replyTo: "",   // куда АЗС отправляет подписанные акты
   autoSeal: true,
   sealDesc: true,
   sign: "",            // подпись исполнителя: PNG data-URL с прозрачным фоном
@@ -135,8 +135,20 @@ function defaultRef(){
     refuels: []    // заправки по топливной карте: {id, date, liters, photo}
   };
 }
+/* поля-картинки (подпись, чеки, снимки маршрутов) вставляются в страницу как <img src>: из файла копии или хранилища
+   принимаются только data:image/…;base64 — иначе подменённая копия могла бы выполнить свой код в приложении */
+const IMG_RE=/^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/]+=*$/;
+const safeImg=v=>typeof v==="string" && IMG_RE.test(v) ? v : "";
+function cleanImages(r, st){
+  if(st) st.sign=safeImg(st.sign);
+  if(r){
+    if(r.routes && typeof r.routes==="object"){ const o={}; Object.keys(r.routes).forEach(k=>{ const v=safeImg(r.routes[k]); if(v) o[k]=v; }); r.routes=o; } else r.routes={};
+    r.refuels=(Array.isArray(r.refuels)?r.refuels:[]).filter(x=>x && typeof x==="object").map(x=>Object.assign({}, x, {photo:safeImg(x.photo)}));
+  }
+}
 let ref = store.get("ref", null) || defaultRef();
 let settings = Object.assign({}, DEFAULT_SETTINGS, store.get("settings", {}));
+cleanImages(ref, settings);
 delete settings.fioShort; delete settings.fioGen; delete settings.fioOv;   // поля прежних версий
 ["updSrc","updLink","updSrc2","updLink2","updAuto","updChecked"].forEach(k=>delete settings[k]);   // настройки обновлений прежних версий
 let acts = store.get("acts", []);
@@ -983,9 +995,10 @@ async function checkReplies(manual){
   try{
     const c=mailCfg(), since=new Date(Math.min(...pend.map(a=>+new Date(a.mail.sent)))-86400000);
     const found=JSON.parse(await mailCall("check", {host:c.imap.host, port:c.imap.port, user:c.from, since:imapDate(since), keys:uniq(pend.map(a=>a.mail.subject))}));
-    let done=0;
+    let done=0; const big=[];
     for(const key of uniq(found.map(f=>f.key))){
       for(const f of found.filter(x=>x.key===key)){
+        if(f.big){ big.push(key); continue; }   // больше 20 МБ — не загружалось
         const m=mimeParse(atob(f.raw)), from=parseAddrs(mimeWords(m.headers.from))[0]||"";
         if(from===c.from) continue;   // своё письмо
         if(!mimeWords(m.headers.subject||"").includes(key)) continue;   // сервер мог искать по части темы
@@ -1004,7 +1017,8 @@ async function checkReplies(manual){
     }
     renderDb();
     if(done) toast("Подписанных актов получено: "+done+" — сохранены в «Загрузки/АЗС»");
-    else if(manual) toast("Ответов с подписанными актами пока нет");
+    else if(manual && !big.length) toast("Ответов с подписанными актами пока нет");
+    if(big.length && manual) alert("Ответ на «"+uniq(big).join("», «")+"» больше 20 МБ — приложение его не загружает. Сохраните вложение из почты вручную.");
   }catch(e){ if(manual) alert("Не удалось проверить почту: "+mailWhy(e)); else console.warn("почта:", e); }
   finally{ replyBusy=false; }
 }
@@ -1555,7 +1569,8 @@ function bindData(){
   $("#bkSave").onclick=async()=>{ try{ await saveBlob(new Blob([JSON.stringify({ref,settings,acts},null,1)],{type:"application/json"}), "akty-backup-"+today()+".json"); toast(NATIVE?"Копия сохранена в «Загрузки/АЗС»":"Копия сохранена"); }catch(err){ alert(err.message); } };
   $("#bkLoad").onchange=async e=>{ const f=e.target.files[0]; e.target.value=""; if(!f) return;
     try{ const d=JSON.parse(await f.text()); if(!d.ref) throw 0;
-      ref=Object.assign(defaultRef(), d.ref); settings=Object.assign({},DEFAULT_SETTINGS,d.settings||{}); acts=d.acts||[];
+      ref=Object.assign(defaultRef(), d.ref); settings=Object.assign({},DEFAULT_SETTINGS,d.settings||{}); acts=Array.isArray(d.acts)?d.acts:[];
+      cleanImages(ref, settings);
       saveRef(); store.set("settings",settings); saveActs(); renderData(); renderAct(); toast("Восстановлено"); }catch(err){ alert("Неверный файл копии"); } };
 }
 
@@ -1845,6 +1860,7 @@ function showAbout(){
         <li>Заправки по топливной карте: дата, литры, фото чека. Остаток на начало месяца переносится с прошлого отчёта, его можно исправить.</li>
         <li>«Отчёт PDF» — маршрутные листы, акт использования ТС, отчёт и чеки с вашей подписью; «Маршруты DOCX» — даты и снимки маршрутов.</li>
       </ol>
+      ${NATIVE?`<div class="warn"><b>⚠ Пароль приложения почты.</b> Он хранится в памяти телефона и в файл «Резервная копия» не попадает, но может попасть в резервную копию самого Android (Google Диск, перенос на новый телефон). Поэтому указывайте только «пароль приложения», не основной пароль от почты; если телефон потерян, продан или сдан в ремонт — удалите этот пароль приложения в Яндекс ID → Безопасность → Пароли приложений (Gmail, Mail.ru — в своих настройках): письма из приложения перестанут отправляться, сама почта останется в безопасности.</div>`:""}
       <h4>База и данные</h4>
       <ol>
         <li>«База» — все акты с поиском; акт можно открыть, повторить для новой заявки или удалить.</li>

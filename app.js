@@ -994,7 +994,9 @@ async function checkReplies(manual){
         for(let i=0;i<files.length;i++){
           const x=files[i], ext=(x.name.match(/\.[A-Za-z0-9]{2,5}$/)||[x.type==="application/pdf"?".pdf":x.type==="image/png"?".png":".jpg"])[0];
           const name=key+" подписан"+(files.length>1?" "+(i+1):"")+ext;
-          await saveBlob(new Blob([binBytes(x.data)],{type:x.type}), name); names.push(name);
+          const blob=new Blob([binBytes(x.data)],{type:x.type});
+          await saveBlob(blob, name); names.push(name);
+          if(Android.storeSigned){ const err=Android.storeSigned(name, await blobToB64(blob)); if(err) console.warn("копия подписанного акта:", err); }   // для открытия из базы
         }
         pend.filter(a=>a.mail.subject===key).forEach(a=>markAct(a.id, {signed:{date:new Date().toISOString(), from, files:names}}));
         done++; break;
@@ -1090,7 +1092,8 @@ function repeatAct(src){
 const ICON_REPEAT=`<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v5h-5"/></svg>`;
 const ICON_TRASH=`<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg>`;
 function mailState(a){
-  if(a.signed) return `<div class="mailst ok">✓ подписан ${esc(fmtDate(missDay(a.signed)))} — ${esc((a.signed.files||[]).join(", "))} в «Загрузки/АЗС»</div>`;
+  if(a.signed) return `<div class="mailst ok">✓ подписан ${esc(fmtDate(missDay(a.signed)))}</div>`+
+    (a.signed.files||[]).map(f=>`<button class="btn sm" data-signed="${esc(f)}" title="Открыть подписанный акт" style="margin-top:4px">📄 ${esc(f)}</button>`).join(" ");
   if(a.mail) return `<div class="mailst">✉ отправлен ${esc(fmtDate(missDay({date:a.mail.sent})))}, ждёт подписанный акт</div>`;
   return "";
 }
@@ -1112,6 +1115,9 @@ function bindDb(){
     const li=e.target.closest(".li"); if(!li) return;
     const b=e.target.closest("button") || {dataset:{}};   // нажатие на сам акт — открыть его
     const a=acts.find(x=>String(x.id)===li.dataset.id); if(!a) return;
+    if(b.dataset.signed!=null){   // подписанный акт из ответа на письмо
+      const err=NATIVE && Android.openSigned ? Android.openSigned(b.dataset.signed) : "файл лежит в «Загрузки/АЗС» на телефоне";
+      if(err) alert("Не удалось открыть «"+b.dataset.signed+"»: "+err); return; }
     if(b.dataset.rm!=null){ if(confirm("Удалить акт "+a.azs+" "+(a.req||"")+" из базы?")){ acts=acts.filter(x=>x!==a); saveActs(); renderDb(); } return; }
     if(act && actHasContent(act) && !acts.some(x=>x.id===act.id)) saveToDb();
     act = b.dataset.rep!=null ? repeatAct(a) : JSON.parse(JSON.stringify(a));
